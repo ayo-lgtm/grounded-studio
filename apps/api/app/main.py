@@ -126,7 +126,7 @@ async def upload_asset(
             INSERT INTO source_assets
               (id, briefing_id, kind, filename, mime, bytes, sha256, minio_key)
             VALUES
-              (:id, :briefing_id, :kind, :filename, :mime, :bytes, :sha256, :key)
+              (:id, :briefing_id, CAST(:kind AS asset_kind), :filename, :mime, :bytes, :sha256, :key)
             """
         ),
         {
@@ -158,7 +158,7 @@ def start_job(briefing_id: str, body: JobIn, db: Session = Depends(get_db)):
         text(
             """
             INSERT INTO jobs (id, briefing_id, type, state, model_ids)
-            VALUES (:id, :briefing_id, :type, 'queued', '{}'::jsonb)
+            VALUES (:id, :briefing_id, CAST(:type AS job_type), 'queued', '{}'::jsonb)
             """
         ),
         {"id": job_id, "briefing_id": briefing_id, "type": body.type},

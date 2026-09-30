@@ -49,6 +49,7 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-grounded}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change-me-too}
+      MINIO_BUCKET: ${MINIO_BUCKET:-grounded}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       CLAUDE_MODEL_ID: ${CLAUDE_MODEL_ID:-anthropic.claude-3-5-sonnet-20241022-v2:0}
     ports:
@@ -72,6 +73,10 @@ services:
       REDIS_URL: redis://redis:6379/0
       AWS_REGION: ${AWS_REGION:-us-east-1}
       CLAUDE_MODEL_ID: ${CLAUDE_MODEL_ID:-anthropic.claude-3-5-sonnet-20241022-v2:0}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_BUCKET: ${MINIO_BUCKET:-grounded}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-grounded}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change-me-too}
       TRANS_PROVIDER: ${TRANS_PROVIDER:-stub}
       TRANS_S3_BUCKET: ${TRANS_S3_BUCKET:-}
       TRANS_LANGUAGE: ${TRANS_LANGUAGE:-en-US}

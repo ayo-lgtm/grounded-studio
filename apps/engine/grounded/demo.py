@@ -10,6 +10,7 @@ from typing import Any, Callable
 from .chat import answer
 from .compile_deck import CompileError, cell_index, compile_document, compile_workbook
 from .compile_recording import compile_delta, compile_recording
+from .director import direct, revise
 from .house import css
 from .localize import localize
 from .qa import validate_script
@@ -85,6 +86,24 @@ def run(out_dir: Path, with_video: bool = True) -> list[dict[str, Any]]:
                 "name": "Grounded chat refuses",
                 "status": "passed" if refused["refused"] else "failed",
                 "detail": refused["text"],
+                "href": None,
+            }
+        )
+        cut = direct(weekly["script"], weekly_pack, cell_index(weekly_pack))
+        results.append(
+            {
+                "name": "Director approves the weekly cut",
+                "status": "passed" if not cut["errors"] else "failed",
+                "detail": "; ".join(cut["notes"]) or "; ".join(cut["errors"]),
+                "href": None,
+            }
+        )
+        recut = revise(weekly["script"], "focus revenue", weekly_pack, cell_index(weekly_pack))
+        results.append(
+            {
+                "name": "Director re-cut on instruction",
+                "status": "passed" if recut["applied"] else "failed",
+                "detail": "; ".join(recut["notes"]),
                 "href": None,
             }
         )

@@ -144,10 +144,10 @@ def _kpi_beat(kpi: dict[str, Any]) -> dict[str, Any]:
     target_addr = kpi.get("target_addr")
     cites = [_workbook(sheet, addr)]
     if kpi["unit"] == "pct":
-        actual_txt = format_pct(kpi["value"])
+        actual_txt = kpi.get("display") or format_pct(kpi["value"])
         actual_claim = {"value": round(kpi["value"] * 100, 1), "cell": kpi["value"], "unit": "pct", "sheet": sheet, "addr": addr}
     else:
-        actual_txt = format_usd(kpi["value"])
+        actual_txt = kpi.get("display") or format_usd(kpi["value"])
         actual_claim = {"value": kpi["value"], "sheet": sheet, "addr": addr}
 
     claims = [actual_claim]
@@ -163,7 +163,7 @@ def _kpi_beat(kpi: dict[str, Any]) -> dict[str, Any]:
 
     cites.append(_workbook(target_sheet, target_addr))
     if kpi["unit"] == "pct":
-        target_txt = format_pct(target)
+        target_txt = kpi.get("target_display") or format_pct(target)
         target_claim = {
             "value": round(target * 100, 1),
             "cell": target,
@@ -185,7 +185,7 @@ def _kpi_beat(kpi: dict[str, Any]) -> dict[str, Any]:
             delta_line = f"{delta_txt} points {word}"
             extra_claims = [{"value": abs(delta_value), "sheet": sheet, "addr": addr, "derived": True}]
     else:
-        target_txt = format_usd(target)
+        target_txt = kpi.get("target_display") or format_usd(target)
         target_claim = {"value": target, "sheet": target_sheet, "addr": target_addr}
         delta = kpi["value"] - target
         relation = _relation(kpi["value"], target)
@@ -242,8 +242,8 @@ def _movers_beat(rows: list[dict[str, Any]]) -> dict[str, Any]:
         table.append(
             {
                 "line": row["label"],
-                "this_week": format_usd_full(row["value"]),
-                "last_week": format_usd_full(row["prior"]),
+                "this_week": row.get("display") or format_usd_full(row["value"]),
+                "last_week": row.get("prior_display") or format_usd_full(row["prior"]),
                 "delta": delta_txt,
             }
         )

@@ -6,10 +6,11 @@ Application skeleton is in `apps/api` and `apps/worker`.
 
 1. Create a briefing
 2. Upload a recording into MinIO
-3. Enqueue `transcribe` (placeholder segment until faster-whisper is installed)
+3. Enqueue `transcribe` (AWS Transcribe when `TRANS_PROVIDER=transcribe`, else a placeholder segment)
 4. Enqueue `compile` — builds a cited script from transcript segments
 5. Citation QA fails closed if a beat has no span
 6. Fetch and accept the script
+7. Enqueue `render` — cuts the real recording (or renders the deck) and adds Polly narration when enabled
 
 The engine also runs without Docker. From the repo root:
 
@@ -20,7 +21,7 @@ PYTHONPATH=apps/engine python -m grounded.studio out/demo
 
 That compiles every v1 skill against fixtures, fails closed on an empty KPI and on a translated number, writes the decks and the edited films, and serves the review at http://127.0.0.1:8765.
 
-Not yet: real Whisper, local LLM rewrite of slot text, SSO, and a review UI beyond the rendered deck.
+Not yet: SSO, and workbook/document ingest through the API (the engine compiles them; the pipeline is recording-first).
 
 ## Run locally
 
@@ -40,7 +41,7 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/briefings \
 
 ## Next
 
-- faster-whisper on the GPU worker image
-- structured compile against local vLLM/Ollama
-- ffmpeg chapter cut + VTT
-- a one-page review UI
+- SSO, then `DEV_BYPASS_AUTH=false`
+- workbook/document ingest through the API (Phase 3/4)
+- EBS snapshots and retention before real business data
+- review UI beyond the studio page (accept flow in the browser)

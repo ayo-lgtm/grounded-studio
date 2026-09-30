@@ -178,8 +178,8 @@ def _render_mp4(
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         return "ffmpeg is not on PATH"
-    font = _font("georgia.ttf", "Georgia.ttf", "times.ttf")
-    ui = _font("segoeui.ttf", "arial.ttf")
+    font = _font("georgia.ttf", "Georgia.ttf", "DejaVuSerif.ttf", "times.ttf")
+    ui = _font("segoeui.ttf", "SegoeUI.ttf", "DejaVuSans.ttf", "arial.ttf", "Arial.ttf")
     if font is None or ui is None:
         return "house fonts are not installed"
     source = source_video
@@ -320,12 +320,20 @@ def _filter(item: dict[str, Any], font: Path, ui: Path) -> str:
 
 
 def _font(*names: str) -> Path | None:
-    windir = Path(__import__("os").environ.get("WINDIR", r"C:\Windows"))
-    folder = windir / "Fonts"
-    for name in names:
-        path = folder / name
-        if path.exists():
-            return path
+    import os
+
+    folders = [
+        Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts",
+        Path("/usr/share/fonts"),
+        Path("/usr/local/share/fonts"),
+    ]
+    for folder in folders:
+        if not folder.exists():
+            continue
+        for name in names:
+            matches = sorted(folder.rglob(name))
+            if matches:
+                return matches[0]
     return None
 
 

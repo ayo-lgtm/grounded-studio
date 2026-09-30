@@ -214,7 +214,8 @@ def render(db, briefing_id: str) -> None:
     out = Path(settings.artifact_dir) / briefing_id
     out.mkdir(parents=True, exist_ok=True)
     if script.get("renderer") == "recording":
-        rendered = render_edit(script, out)
+        source_video = _fetch_source_video(db, briefing_id, out)
+        rendered = render_edit(script, out, source_video=source_video)
         if rendered.get("video_error"):
             raise RuntimeError(rendered["video_error"])
     else:
@@ -228,6 +229,38 @@ def render(db, briefing_id: str) -> None:
         {"id": briefing_id},
     )
     db.commit()
+
+
+def _latest_recording(db, briefing_id: str):
+    asset = db.execute(
+        text(
+            """
+            SELECT id, minio_key, mime, filename FROM source_assets
+            WHERE briefing_id = :id AND kind = 'recording'
+            ORDER BY created_at DESC LIMIT 1
+            """
+        ),
+        {"id": briefing_id},
+    ).first()
+    if not asset:
+        raise RuntimeError("no recording asset")
+    return asset
+
+
+def _fetch_source_video(db, briefing_id: str, out: Path):
+    """Download the real capture so render cuts source pixels, not synthesis."""
+    from .store import download_file
+
+    asset = _latest_recording(db, briefing_id)
+    suffix = Path(asset[3] or "").suffix or ".mp4"
+    return download_file(
+        settings.minio_endpoint,
+        settings.minio_bucket,
+        asset[1],
+        settings.minio_access_key,
+        settings.minio_secret_key,
+        out / f"upload{suffix}",
+    )
 
 
 def _transcribe_via_aws(db, briefing_id: str, asset) -> None:
