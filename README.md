@@ -38,6 +38,7 @@ Existing tools either send data to a SaaS model or generate cinematic video that
 | [docs/07-pipeline.md](docs/07-pipeline.md) | Job pipeline |
 | [docs/08-build-plan.md](docs/08-build-plan.md) | Phased build for a job-internal v1 |
 | [docs/09-api.md](docs/09-api.md) | HTTP API sketch |
+| [docs/13-house-style.md](docs/13-house-style.md) | Locked type, color, and the two renderers |
 | [schema/schema.sql](schema/schema.sql) | Postgres schema |
 | [skills/](skills/) | Skill definitions the router loads |
 
@@ -61,4 +62,12 @@ Cloud SaaS video models (Veo, Runway, HeyGen, BookWatch-style generators) are **
 
 ## Status
 
-Specification complete. Implementation not started.
+House style, both renderers, and the v1 skill compilers live in `apps/engine`.
+A local run writes decks and edit lists to `out/demo`:
+
+```bash
+PYTHONPATH=apps/engine python -m grounded.demo out/demo
+PYTHONPATH=apps/engine python -m grounded.studio out/demo
+```
+
+Open http://127.0.0.1:8765. The weekly deck, the leadership deck, and the walkthrough player are on that page. The film is an edit of a source recording: filler and dead air are cut, captions and chapter cards are added, and a click zooms the source pixels. Chat on that page quotes the weekly pack or refuses.

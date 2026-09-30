@@ -17,6 +17,9 @@
         "properties": {
           "ord": { "type": "integer", "minimum": 1 },
           "kind": { "type": "string" },
+          "layout": {
+            "enum": ["cover", "big-number", "versus-target", "movers", "risk", "ask", "statement", "step"]
+          },
           "text": { "type": "string", "minLength": 1 },
           "visual": { "type": "object" },
           "citations": {

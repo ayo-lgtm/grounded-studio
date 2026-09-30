@@ -16,8 +16,10 @@ story_beats:
   - risks / asks only from a dedicated sheet or labeled rows
 
 visual_grammar:
-  - snapshot the real cell range to an image via headless render
-  - do not ask an image model to redraw the chart
+  - renderer: deck
+  - layouts: cover, big-number, versus-target, movers, risk, ask
+  - the table is the cited cells, not a redrawn chart
+  - chrome comes from house.py
 
 forbidden:
   - interpolating missing weeks

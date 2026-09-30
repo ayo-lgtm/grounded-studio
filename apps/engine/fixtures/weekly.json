@@ -1,0 +1,39 @@
+{
+  "title": {"sheet": "Notes", "addr": "A1", "text": "Monday operating review"},
+  "period": {"sheet": "Notes", "addr": "A2", "text": "Week of 28 Sep 2026"},
+  "kpis": [
+    {
+      "label": "Net revenue",
+      "sheet": "KPI",
+      "addr": "B12",
+      "value": 4820000,
+      "unit": "usd",
+      "target_sheet": "KPI",
+      "target_addr": "C12",
+      "target": 4600000,
+      "required": true
+    },
+    {
+      "label": "Gross margin",
+      "sheet": "KPI",
+      "addr": "B14",
+      "value": 0.412,
+      "unit": "pct",
+      "target_sheet": "KPI",
+      "target_addr": "C14",
+      "target": 0.4,
+      "required": true
+    }
+  ],
+  "movers": [
+    {"label": "EMEA", "sheet": "Movers", "addr": "B4", "value": 980000, "prior_addr": "C4", "prior": 1100000},
+    {"label": "Americas", "sheet": "Movers", "addr": "B5", "value": 2410000, "prior_addr": "C5", "prior": 2350000},
+    {"label": "APAC", "sheet": "Movers", "addr": "B6", "value": 1430000, "prior_addr": "C6", "prior": 1430000}
+  ],
+  "risks": [
+    {"sheet": "Notes", "addr": "A3", "text": "Collections slipped in two enterprise accounts."}
+  ],
+  "asks": [
+    {"sheet": "Notes", "addr": "A5", "text": "Approve a collections standup for those two accounts."}
+  ]
+}

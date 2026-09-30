@@ -18,8 +18,9 @@ story_beats:
   - owner if present
 
 visual_grammar:
-  - prefer recording frames per step
-  - else text + attached images
+  - renderer: recording editor, same house style as product-walkthrough
+  - layout: step
+  - one numbered step per spoken line; guide.md is that list
 
 forbidden:
   - adding safety or compliance steps that are not in the source

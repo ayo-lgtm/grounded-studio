@@ -10,6 +10,11 @@ inputs_optional:
 
 truth_source: parent accepted script + new sources only
 
+visual_grammar:
+  - renderer: recording editor
+  - layouts: step, and statement only when a changelog block is cited
+  - unchanged parent beats stay verbatim
+
 story_beats:
   - what is unchanged
   - what changed

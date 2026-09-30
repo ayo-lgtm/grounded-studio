@@ -1,0 +1,24 @@
+{
+  "title": "Weekly close",
+  "segments": [
+    {
+      "t_start_ms": 0,
+      "t_end_ms": 4000,
+      "text": "Export the workbook from the close folder.",
+      "screen": "Close folder"
+    },
+    {"t_start_ms": 4000, "t_end_ms": 4600, "text": "uh"},
+    {
+      "t_start_ms": 6200,
+      "t_end_ms": 10400,
+      "text": "Check that the revenue cell matches the ledger.",
+      "screen": "Ledger"
+    },
+    {
+      "t_start_ms": 12000,
+      "t_end_ms": 15500,
+      "text": "Send the pack to the review channel.",
+      "screen": "Review channel"
+    }
+  ]
+}

@@ -11,7 +11,16 @@ Application skeleton is in `apps/api` and `apps/worker`.
 5. Citation QA fails closed if a beat has no span
 6. Fetch and accept the script
 
-Not yet: real Whisper, local LLM rewrite, ffmpeg render, player UI, SSO.
+The engine also runs without Docker. From the repo root:
+
+```bash
+PYTHONPATH=apps/engine python -m grounded.demo out/demo
+PYTHONPATH=apps/engine python -m grounded.studio out/demo
+```
+
+That compiles every v1 skill against fixtures, fails closed on an empty KPI and on a translated number, writes the decks and the edited films, and serves the review at http://127.0.0.1:8765.
+
+Not yet: real Whisper, local LLM rewrite of slot text, SSO, and a review UI beyond the rendered deck.
 
 ## Run locally
 

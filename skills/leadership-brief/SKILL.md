@@ -17,11 +17,10 @@ story_beats:
   Omit a beat if the document does not contain it. Do not fill the hole.
 
 visual_grammar:
-  - 6 to 12 slides
-  - one idea per slide
-  - large number only if the number exists in the document
-  - no stock photos
-  - no decorative charts that are not in the source
+  - renderer: deck
+  - layouts: cover, statement, risk, ask
+  - the sentence on the slide is the source sentence
+  - chrome comes from house.py
 
 forbidden:
   - new recommendations

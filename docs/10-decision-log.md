@@ -23,3 +23,13 @@ No web. No other briefings in context.
 
 ## D8. Study OpenMontage / Diffusion / Bolt Slides
 Do not vendor AGPL OpenMontage. Render with ffmpeg + HTML slides first.
+
+## D9. Two renderers, one house style
+`product-walkthrough`, `sop-training`, and `feature-delta` share the recording editor.
+`weekly-ops-review`, `leadership-brief`, and `launch-announcement` share locked slide masters.
+Tokens live in `apps/engine/grounded/house.py`. A script that carries `style`, `color`, or `font` fails QA.
+
+## D10. The model fills slots
+Action titles for a workbook are sentences over cited cells. Document beats copy the source sentence.
+Empty required KPIs fail the compile. A localized line whose numbers differ fails the compile.
+Chat quotes a beat or refuses.

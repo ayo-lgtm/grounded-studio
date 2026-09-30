@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from typing import Optional
 
@@ -14,7 +15,14 @@ from sqlalchemy.orm import Session
 
 from .db import get_db, ping
 from .queue import enqueue, new_id
+from .settings import settings
 from .storage import put_bytes, signed_url
+from .validation import UploadTooLarge, is_allowed_kind, read_limited, sanitize_filename
+
+
+def _require_dev_auth() -> None:
+    if not settings.dev_bypass_auth:
+        raise HTTPException(501, "SSO auth is not wired yet")
 
 app = FastAPI(title="Grounded Studio", version="0.1.0")
 app.add_middleware(
@@ -35,14 +43,19 @@ class JobIn(BaseModel):
     type: str
 
 
+class ChatIn(BaseModel):
+    question: str
+
+
 @app.get("/health")
 def health():
     ok = ping()
-    return {"ok": ok, "egress": "denied-by-policy"}
+    return {"ok": ok, "egress": "aws-in-region", "chat": "bedrock"}
 
 
 @app.post("/api/v1/briefings")
 def create_briefing(body: BriefingIn, db: Session = Depends(get_db)):
+    _require_dev_auth()
     briefing_id = new_id()
     project_id = body.project_id or _ensure_dev_project(db)
     db.execute(
@@ -95,10 +108,17 @@ async def upload_asset(
     ).first()
     if not exists:
         raise HTTPException(404, "briefing not found")
-    data = await file.read()
+    _require_dev_auth()
+    if not is_allowed_kind(kind):
+        raise HTTPException(400, f"unknown asset kind {kind}")
+    try:
+        data = await read_limited(file.read)
+    except UploadTooLarge as exc:
+        raise HTTPException(413, str(exc))
     digest = hashlib.sha256(data).hexdigest()
     asset_id = new_id()
-    key = f"briefings/{briefing_id}/{asset_id}/{file.filename}"
+    safe_name = sanitize_filename(file.filename)
+    key = f"briefings/{briefing_id}/{asset_id}/{safe_name}"
     put_bytes(key, data, file.content_type or "application/octet-stream")
     db.execute(
         text(
@@ -113,7 +133,7 @@ async def upload_asset(
             "id": asset_id,
             "briefing_id": briefing_id,
             "kind": kind,
-            "filename": file.filename,
+            "filename": safe_name,
             "mime": file.content_type or "application/octet-stream",
             "bytes": len(data),
             "sha256": digest,
@@ -126,9 +146,13 @@ async def upload_asset(
 
 @app.post("/api/v1/briefings/{briefing_id}/jobs")
 def start_job(briefing_id: str, body: JobIn, db: Session = Depends(get_db)):
+    _require_dev_auth()
     allowed = {"ingest", "transcribe", "compile", "qa", "render", "index"}
     if body.type not in allowed:
         raise HTTPException(400, f"unknown job type {body.type}")
+    exists = db.execute(text("SELECT 1 FROM briefings WHERE id = :id"), {"id": briefing_id}).first()
+    if not exists:
+        raise HTTPException(404, "briefing not found")
     job_id = new_id()
     db.execute(
         text(
@@ -176,6 +200,7 @@ def get_script(briefing_id: str, db: Session = Depends(get_db)):
 
 @app.post("/api/v1/briefings/{briefing_id}/script/accept")
 def accept_script(briefing_id: str, db: Session = Depends(get_db)):
+    _require_dev_auth()
     result = db.execute(
         text(
             """
@@ -208,6 +233,29 @@ def asset_content(asset_id: str, db: Session = Depends(get_db)):
     if not row:
         raise HTTPException(404, "asset not found")
     return {"url": signed_url(row[0])}
+
+
+@app.post("/api/v1/briefings/{briefing_id}/chat")
+def briefing_chat(briefing_id: str, body: ChatIn, db: Session = Depends(get_db)):
+    from grounded.chat import answer_with_claude
+
+    question = (body.question or "").strip()
+    if not question:
+        raise HTTPException(400, "question is required")
+    row = db.execute(
+        text(
+            """
+            SELECT raw_json FROM script_versions
+            WHERE briefing_id = :id
+            ORDER BY version DESC LIMIT 1
+            """
+        ),
+        {"id": briefing_id},
+    ).first()
+    if not row:
+        raise HTTPException(404, "no script yet")
+    raw = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+    return answer_with_claude(raw, question[:2000])
 
 
 def _dev_user(db: Session) -> str:

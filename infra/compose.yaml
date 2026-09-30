@@ -1,5 +1,6 @@
-# Pilot deploy on a locked-down internal box.
-# No public model endpoints. Point MODEL_BASE_URL at local vLLM/Ollama.
+# Pilot deploy on an internal AWS box (single EC2).
+# AI runs on Bedrock Claude in-region; transcription on AWS Transcribe.
+# The instance profile supplies credentials — never put AWS keys in .env.
 
 services:
   postgres:
@@ -48,6 +49,8 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-grounded}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change-me-too}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      CLAUDE_MODEL_ID: ${CLAUDE_MODEL_ID:-anthropic.claude-3-5-sonnet-20241022-v2:0}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -67,6 +70,13 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-grounded}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-grounded}
       REDIS_URL: redis://redis:6379/0
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      CLAUDE_MODEL_ID: ${CLAUDE_MODEL_ID:-anthropic.claude-3-5-sonnet-20241022-v2:0}
+      TRANS_PROVIDER: ${TRANS_PROVIDER:-stub}
+      TRANS_S3_BUCKET: ${TRANS_S3_BUCKET:-}
+      TRANS_LANGUAGE: ${TRANS_LANGUAGE:-en-US}
+      NARRATION_PROVIDER: ${NARRATION_PROVIDER:-}
+      NARRATION_VOICE: ${NARRATION_VOICE:-}
     depends_on:
       postgres:
         condition: service_healthy

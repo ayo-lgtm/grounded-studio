@@ -18,9 +18,10 @@ story_beats:
   - FAQ copied from the doc
 
 visual_grammar:
-  - slides
-  - use attached screenshots as-is
-  - do not generate product UI
+  - renderer: deck
+  - layouts: cover, statement, ask
+  - attached screenshots can sit in a later master; v1 shows the source sentence
+  - chrome comes from house.py
 
 forbidden:
   - new dates, pricing, or promises

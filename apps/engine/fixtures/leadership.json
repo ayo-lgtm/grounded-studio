@@ -1,0 +1,10 @@
+{
+  "title": "Pricing change",
+  "title_block": "b1",
+  "blocks": [
+    {"id": "b1", "role": "situation", "text": "Enterprise discounting widened this quarter."},
+    {"id": "b2", "role": "evidence", "text": "Average discount reached 18% against a 12% ceiling."},
+    {"id": "b3", "role": "ask", "text": "Freeze discounts above 12% through October."},
+    {"id": "b4", "role": "risk", "text": "Two renewals this month were quoted under the old rule."}
+  ]
+}

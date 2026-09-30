@@ -11,6 +11,13 @@ class Settings(BaseSettings):
     model_base_url: str = ""
     model_name: str = "local-instruct"
     whisper_model: str = "medium"
+    aws_region: str = "us-east-1"
+    trans_provider: str = "stub"
+    trans_s3_bucket: str = ""
+    trans_language: str = "en-US"
+    trans_timeout_s: int = 1800
+    narration_provider: str = ""
+    artifact_dir: str = "out/jobs"
 
     class Config:
         env_file = ".env"

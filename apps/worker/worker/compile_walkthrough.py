@@ -1,36 +1,17 @@
 """product-walkthrough compiler.
 
-If MODEL_BASE_URL is unset, builds a conservative script from transcript
-segments so the loop can be tested without a GPU.
+Without a local model, the recording compiler drops filler and writes an edit
+list. It does not restyle the recording.
 """
 
 from typing import Any
 
+from .bootstrap import ensure_engine
+
+ensure_engine()
+
+from grounded.compile_recording import compile_recording  # noqa: E402
+
 
 def stub_from_transcript(segments: list[dict[str, Any]]) -> dict[str, Any]:
-    beats = []
-    for i, seg in enumerate(segments, start=1):
-        text = (seg.get("text") or "").strip()
-        if not text:
-            continue
-        beats.append(
-            {
-                "ord": len(beats) + 1,
-                "kind": "hook" if i == 1 else "step",
-                "text": text,
-                "citations": [
-                    {
-                        "kind": "recording",
-                        "t_start_ms": int(seg["t_start_ms"]),
-                        "t_end_ms": int(seg["t_end_ms"]),
-                    }
-                ],
-            }
-        )
-    return {
-        "skill_id": "product-walkthrough",
-        "skill_version": "1.0.0",
-        "language": "en",
-        "title": "Walkthrough",
-        "beats": beats,
-    }
+    return compile_recording(segments, skill_id="product-walkthrough", title="Walkthrough")

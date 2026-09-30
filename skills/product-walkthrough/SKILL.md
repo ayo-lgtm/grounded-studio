@@ -17,10 +17,11 @@ story_beats:
   - next action only if present in source
 
 visual_grammar:
-  - use the source video
-  - zoom toward click or cursor if detected
-  - never generate a fake UI
-  - captions from the cleaned script
+  - renderer: recording editor
+  - layout: step
+  - drop filler and dead air; chapter card uses the screen label read off the capture
+  - zoom toward a detected click; captions are the spoken line
+  - chrome comes from house.py, not from this skill
 
 forbidden:
   - naming buttons, menus, or features not in the transcript or attached docs

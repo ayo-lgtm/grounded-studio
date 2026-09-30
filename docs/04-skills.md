@@ -1,6 +1,8 @@
 # 04 — Skill catalog
 
-A **skill** is a versioned playbook: required inputs, story beats, visual grammar, QA, outputs.
+A **skill** is a versioned playbook: required inputs, story beats, which locked layouts it may use, and QA.
+
+Two renderers serve every v1 skill. The recording editor cuts a real capture. The deck renderer fills masters in `apps/engine/grounded/house.py`. A skill does not choose type, color, or spacing.
 
 v1 ships **8 skills**. v1.5 adds **4**. Do not invent more until these work.
 

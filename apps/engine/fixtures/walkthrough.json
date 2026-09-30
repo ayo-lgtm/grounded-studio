@@ -1,0 +1,27 @@
+{
+  "title": "Billing walkthrough",
+  "segments": [
+    {
+      "t_start_ms": 0,
+      "t_end_ms": 3200,
+      "text": "Open Settings from the left nav.",
+      "screen": "Settings",
+      "click": {"x": 0.12, "y": 0.4}
+    },
+    {"t_start_ms": 3200, "t_end_ms": 3900, "text": "um"},
+    {
+      "t_start_ms": 4700,
+      "t_end_ms": 8600,
+      "text": "Choose Billing, then Payment method.",
+      "screen": "Billing",
+      "click": {"x": 0.22, "y": 0.48}
+    },
+    {"t_start_ms": 8600, "t_end_ms": 9100, "text": ""},
+    {
+      "t_start_ms": 10400,
+      "t_end_ms": 14800,
+      "text": "Save. The banner confirms the card on file.",
+      "screen": "Card on file"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "title": "Billing receipts",
+  "title_block": "b1",
+  "blocks": [
+    {"id": "b1", "role": "evidence", "text": "Billing receipts now send for every paid workspace."},
+    {"id": "b2", "role": "evidence", "text": "Finance and workspace admins are the audience."},
+    {"id": "b3", "role": "evidence", "text": "A receipt goes out when a card is charged."},
+    {"id": "b4", "role": "evidence", "text": "It is on for new charges today."},
+    {"id": "b5", "role": "ask", "text": "Turn it on under Billing, then Payment method."}
+  ]
+}
