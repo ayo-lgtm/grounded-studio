@@ -1,6 +1,8 @@
+import os
 import unittest
+from pathlib import Path
 
-from grounded.render_recording import _font, _vtt_clock, timeline
+from grounded.render_recording import _concat_list, _font, _vtt_clock, timeline
 
 
 class RenderRecordingTest(unittest.TestCase):
@@ -10,6 +12,12 @@ class RenderRecordingTest(unittest.TestCase):
     def test_vtt_clock_format(self):
         self.assertEqual(_vtt_clock(0), "00:00:00.000")
         self.assertEqual(_vtt_clock(3723123), "01:02:03.123")
+
+    def test_concat_list_writes_absolute_entries(self):
+        text = _concat_list([Path("out/jobs/abc/_clips/clip00.mp4")])
+        entry = text.strip().removeprefix("file ").strip("'")
+        self.assertTrue(os.path.isabs(entry))
+        self.assertTrue(entry.endswith("out/jobs/abc/_clips/clip00.mp4"))
 
     def test_timeline_chapters_and_cuts(self):
         script = {

@@ -117,7 +117,7 @@ def _clip(ffmpeg: str, dest: Path, seconds: float, vf: str) -> str | None:
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         tail = (proc.stderr or "").strip().splitlines()
-        return tail[-1] if tail else "ffmpeg failed to paint the source"
+        return " | ".join(tail[-3:]) if tail else "ffmpeg failed to paint the source"
     return None
 
 
@@ -132,7 +132,7 @@ def _concat(ffmpeg: str, paths: list[Path], dest: Path) -> str | None:
     listing.unlink(missing_ok=True)
     if proc.returncode != 0:
         tail = (proc.stderr or "").strip().splitlines()
-        return tail[-1] if tail else "ffmpeg failed to join the source"
+        return " | ".join(tail[-3:]) if tail else "ffmpeg failed to join the source"
     return None
 
 

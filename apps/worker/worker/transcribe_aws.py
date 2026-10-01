@@ -81,6 +81,7 @@ def stage_from_store(
     dest_bucket: str,
     dest_key: str,
     region: str,
+    store_region: str = "us-east-1",
 ) -> str:
     """Copy an object from the S3-compatible store to real S3. Returns the S3 URI."""
     boto3 = _boto3()
@@ -90,7 +91,7 @@ def stage_from_store(
             endpoint_url=minio_endpoint,
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
-            region_name="us-east-1",
+            region_name=store_region,
         )
         body = store.get_object(Bucket=bucket, Key=key)["Body"].read()
         s3 = boto3.client("s3", region_name=region)

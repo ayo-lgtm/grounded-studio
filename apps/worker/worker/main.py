@@ -12,7 +12,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from .bootstrap import ensure_engine
-from .compile_walkthrough import stub_from_transcript
 from .qa import validate_script
 from .settings import settings
 
@@ -114,6 +113,15 @@ def transcribe(db, briefing_id: str) -> None:
 
 
 def compile_script(db, briefing_id: str) -> None:
+    from grounded.compile_deck import CompileError
+    from grounded.compile_sources import compile_uploaded
+
+    briefing = db.execute(
+        text("SELECT skill_id, title FROM briefings WHERE id = :id"),
+        {"id": briefing_id},
+    ).first()
+    if not briefing:
+        raise RuntimeError("briefing not found")
     rows = db.execute(
         text(
             """
@@ -126,10 +134,17 @@ def compile_script(db, briefing_id: str) -> None:
         ),
         {"id": briefing_id},
     ).mappings().all()
-    if not rows:
-        raise RuntimeError("transcribe first")
-    script = stub_from_transcript([dict(r) for r in rows])
-    errors = validate_script(script)
+    try:
+        script = compile_uploaded(
+            skill_id=briefing[0],
+            title=briefing[1],
+            segments=[dict(row) for row in rows],
+            document=_latest_bytes(db, briefing_id, "document"),
+            workbook=_latest_bytes(db, briefing_id, "workbook"),
+        )
+    except CompileError as exc:
+        raise RuntimeError("; ".join(exc.errors)) from exc
+    errors = validate_script(script, duration_ms=script.get("source_duration_ms"))
     if errors:
         raise RuntimeError("compile QA failed: " + "; ".join(errors))
     version = db.execute(
@@ -224,11 +239,100 @@ def render(db, briefing_id: str) -> None:
         from grounded.narrate import narrate_script
 
         narrate_script(script, out / "voiceover.mp3", region=settings.aws_region)
+    _persist_artifacts(db, briefing_id, out)
+
     db.execute(
         text("UPDATE briefings SET state = 'review' WHERE id = :id"),
         {"id": briefing_id},
     )
     db.commit()
+
+
+def _persist_artifacts(db, briefing_id: str, out: Path) -> None:
+    import hashlib
+
+    from .store import artifact_kind, content_type_for, upload_file
+
+    rows = []
+    for path in sorted(out.iterdir()):
+        if not path.is_file():
+            continue
+        kind = artifact_kind(path.name)
+        if kind is None:
+            continue
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        key = f"briefings/{briefing_id}/artifacts/{path.name}"
+        size = upload_file(
+            settings.minio_endpoint,
+            settings.minio_bucket,
+            key,
+            settings.minio_access_key,
+            settings.minio_secret_key,
+            path,
+            content_type_for(path.suffix),
+            region=settings.minio_region,
+        )
+        rows.append((str(uuid.uuid4()), kind, key, digest.hexdigest(), size))
+    db.execute(
+        text("DELETE FROM artifacts WHERE briefing_id = :id"),
+        {"id": briefing_id},
+    )
+    for artifact_id, kind, key, sha, size in rows:
+        db.execute(
+            text(
+                "INSERT INTO artifacts (id, briefing_id, kind, minio_key, sha256, bytes) "
+                "VALUES (:id, :briefing_id, :kind, :key, :sha, :bytes)"
+            ),
+            {
+                "id": artifact_id,
+                "briefing_id": briefing_id,
+                "kind": kind,
+                "key": key,
+                "sha": sha,
+                "bytes": size,
+            },
+        )
+
+def _latest_bytes(db, briefing_id: str, kind: str) -> bytes | None:
+    row = db.execute(
+        text(
+            """
+            SELECT minio_key, filename FROM source_assets
+            WHERE briefing_id = :id AND kind = CAST(:kind AS asset_kind)
+            ORDER BY created_at DESC LIMIT 1
+            """
+        ),
+        {"id": briefing_id, "kind": kind},
+    ).first()
+    if not row:
+        return None
+    import tempfile
+
+    suffix = Path(row[1] or "").suffix
+    handle = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    handle.close()
+    dest = Path(handle.name)
+    try:
+        _download_asset(row[0], dest)
+        return dest.read_bytes()
+    finally:
+        dest.unlink(missing_ok=True)
+
+
+def _download_asset(key: str, dest: Path) -> None:
+    from .store import download_file
+
+    download_file(
+        settings.minio_endpoint,
+        settings.minio_bucket,
+        key,
+        settings.minio_access_key,
+        settings.minio_secret_key,
+        dest,
+    )
 
 
 def _latest_recording(db, briefing_id: str):
@@ -260,6 +364,7 @@ def _fetch_source_video(db, briefing_id: str, out: Path):
         settings.minio_access_key,
         settings.minio_secret_key,
         out / f"upload{suffix}",
+        region=settings.minio_region,
     )
 
 
@@ -279,6 +384,7 @@ def _transcribe_via_aws(db, briefing_id: str, asset) -> None:
         settings.trans_s3_bucket,
         dest_key,
         settings.aws_region,
+        settings.minio_region,
     )
     job_name = f"grounded-{str(asset_id).replace('-', '')[:24]}-{int(time.time())}"
     payload = transcribe_media(

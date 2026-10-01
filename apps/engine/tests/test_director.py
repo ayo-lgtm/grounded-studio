@@ -170,7 +170,7 @@ class DirectorTest(unittest.TestCase):
         )
         script = _script()
         result = revise(script, "polish beat 2", PACK, _cells(), client=client)
-        self.assertTrue(result["applied"])
+        self.assertFalse(result["applied"])
         self.assertEqual(result["script"]["beats"][1]["text"], script["beats"][1]["text"])
         self.assertIn("numbers drifted", result["notes"][0])
 
@@ -180,14 +180,14 @@ class DirectorTest(unittest.TestCase):
         )
         script = _script()
         result = revise(script, "polish beat 2", PACK, _cells(), client=client)
-        self.assertTrue(result["applied"])
+        self.assertFalse(result["applied"])
         self.assertEqual(result["script"]["beats"][1]["text"], script["beats"][1]["text"])
         self.assertIn("dropped surface", result["notes"][0])
 
     def test_polish_without_client_keeps_verbatim(self):
         script = _script()
         result = revise(script, "polish beat 2", PACK, _cells())
-        self.assertTrue(result["applied"])
+        self.assertFalse(result["applied"])
         self.assertEqual(result["script"]["beats"][1]["text"], script["beats"][1]["text"])
         self.assertIn("kept verbatim", result["notes"][0])
 

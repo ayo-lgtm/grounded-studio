@@ -104,7 +104,7 @@ def compile_document(doc: dict[str, Any], skill_id: str) -> dict[str, Any]:
         raise CompileError(["document has no blocks"])
     beats: list[dict[str, Any]] = []
     title = doc.get("title") or "Briefing"
-    title_block = doc.get("title_block") or blocks[0]["id"]
+    title_block = doc.get("title_block") or (blocks[0]["id"] if blocks else "p1")
     _add(
         beats,
         kind="cover",
@@ -123,6 +123,8 @@ def compile_document(doc: dict[str, Any], skill_id: str) -> dict[str, Any]:
             role, "Note"
         )
         text = block["text"].strip()
+        if block.get("id") == title_block and text == title.strip():
+            continue
         _add(
             beats,
             kind=role,

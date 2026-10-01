@@ -1,0 +1,8 @@
+{
+  "name": "grounded-studio-infra",
+  "private": true,
+  "description": "Pins the Railway IaC SDK used by .railway/railway.ts. No runtime code.",
+  "dependencies": {
+    "railway": "^3.12.0"
+  }
+}

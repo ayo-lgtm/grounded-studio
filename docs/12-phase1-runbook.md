@@ -7,10 +7,11 @@ Application skeleton is in `apps/api` and `apps/worker`.
 1. Create a briefing
 2. Upload a recording into MinIO
 3. Enqueue `transcribe` (AWS Transcribe when `TRANS_PROVIDER=transcribe`, else a placeholder segment)
-4. Enqueue `compile` — builds a cited script from transcript segments
+4. Enqueue `compile` — a transcript becomes a walkthrough, a workbook JSON pack becomes the weekly deck, and a `.docx` becomes a leadership or launch deck. The director gates run before the script is saved.
 5. Citation QA fails closed if a beat has no span
 6. Fetch and accept the script
 7. Enqueue `render` — cuts the real recording (or renders the deck) and adds Polly narration when enabled
+8. Rendered files persist as artifacts (video, captions, deck, storyboard) and download via the artifacts endpoints
 
 The engine also runs without Docker. From the repo root:
 
@@ -21,7 +22,7 @@ PYTHONPATH=apps/engine python -m grounded.studio out/demo
 
 That compiles every v1 skill against fixtures, fails closed on an empty KPI and on a translated number, writes the decks and the edited films, and serves the review at http://127.0.0.1:8765.
 
-Not yet: SSO, and workbook/document ingest through the API (the engine compiles them; the pipeline is recording-first).
+Not yet: SSO. Workbook JSON and `.docx` compile through the worker; an `.xlsx` grid is not parsed.
 
 ## Run locally
 

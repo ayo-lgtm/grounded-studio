@@ -5,19 +5,24 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .db import get_db, ping
 from .queue import enqueue, new_id
+from .ranges import content_type, slice_body
 from .settings import settings
-from .storage import put_bytes, signed_url
+from .storage import put_bytes, read_bytes, signed_url
 from .validation import UploadTooLarge, is_allowed_kind, read_limited, sanitize_filename
+
+_ROOM = (Path(__file__).resolve().parent / "room.html").read_text(encoding="utf-8")
 
 
 def _require_dev_auth() -> None:
@@ -53,6 +58,11 @@ def health():
     return {"ok": ok, "egress": "aws-in-region", "chat": "bedrock"}
 
 
+@app.get("/")
+def room():
+    return HTMLResponse(_ROOM, headers={"Cache-Control": "no-store"})
+
+
 @app.post("/api/v1/briefings")
 def create_briefing(body: BriefingIn, db: Session = Depends(get_db)):
     _require_dev_auth()
@@ -77,6 +87,21 @@ def create_briefing(body: BriefingIn, db: Session = Depends(get_db)):
     )
     db.commit()
     return {"id": briefing_id, "state": "draft", "skill_id": body.skill_id}
+
+
+@app.get("/api/v1/briefings")
+def list_briefings(db: Session = Depends(get_db)):
+    rows = db.execute(
+        text(
+            """
+            SELECT id, title, state, skill_id, created_at
+            FROM briefings
+            ORDER BY created_at DESC
+            LIMIT 20
+            """
+        )
+    ).mappings().all()
+    return {"briefings": [_public_row(row) for row in rows]}
 
 
 @app.get("/api/v1/briefings/{briefing_id}")
@@ -235,6 +260,55 @@ def asset_content(asset_id: str, db: Session = Depends(get_db)):
     return {"url": signed_url(row[0])}
 
 
+@app.get("/api/v1/briefings/{briefing_id}/artifacts")
+def list_artifacts(briefing_id: str, db: Session = Depends(get_db)):
+    rows = db.execute(
+        text(
+            "SELECT id, kind, bytes, sha256, created_at FROM artifacts "
+            "WHERE briefing_id = :id ORDER BY created_at"
+        ),
+        {"id": briefing_id},
+    ).mappings().all()
+    return {"artifacts": [dict(row) for row in rows]}
+
+
+@app.get("/api/v1/artifacts/{artifact_id}/content")
+def artifact_content(artifact_id: str, db: Session = Depends(get_db)):
+    row = db.execute(
+        text("SELECT minio_key FROM artifacts WHERE id = :id"),
+        {"id": artifact_id},
+    ).first()
+    if not row:
+        raise HTTPException(404, "artifact not found")
+    return {"url": signed_url(row[0])}
+
+
+@app.get("/api/v1/artifacts/{artifact_id}/file")
+def artifact_file(artifact_id: str, request: Request, db: Session = Depends(get_db)):
+    """Stream an artifact from this origin so the film can seek and the deck can be framed."""
+    row = db.execute(
+        text("SELECT minio_key FROM artifacts WHERE id = :id"),
+        {"id": artifact_id},
+    ).first()
+    if not row:
+        raise HTTPException(404, "artifact not found")
+    try:
+        data = read_bytes(row[0])
+    except FileNotFoundError:
+        raise HTTPException(404, "artifact missing")
+    try:
+        status, body, headers = slice_body(data, request.headers.get("range"))
+    except ValueError:
+        return Response(
+            status_code=416,
+            headers={"Content-Range": f"bytes */{len(data)}", "Accept-Ranges": "bytes"},
+        )
+    headers["Content-Type"] = content_type(row[0])
+    headers["Content-Disposition"] = "inline"
+    headers["Cache-Control"] = "private, max-age=300"
+    return Response(content=body, status_code=status, headers=headers)
+
+
 @app.post("/api/v1/briefings/{briefing_id}/chat")
 def briefing_chat(briefing_id: str, body: ChatIn, db: Session = Depends(get_db)):
     from grounded.chat import answer_with_claude
@@ -256,6 +330,18 @@ def briefing_chat(briefing_id: str, body: ChatIn, db: Session = Depends(get_db))
         raise HTTPException(404, "no script yet")
     raw = row[0] if isinstance(row[0], dict) else json.loads(row[0])
     return answer_with_claude(raw, question[:2000])
+
+
+def _public_row(row) -> dict:
+    item = {}
+    for key, value in dict(row).items():
+        if isinstance(value, uuid.UUID):
+            item[key] = str(value)
+        elif hasattr(value, "isoformat"):
+            item[key] = value.isoformat()
+        else:
+            item[key] = value
+    return item
 
 
 def _dev_user(db: Session) -> str:

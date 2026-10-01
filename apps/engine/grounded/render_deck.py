@@ -45,6 +45,10 @@ document.addEventListener("keydown", (event) => {{
   if (["ArrowRight", "ArrowDown", " "].includes(event.key)) {{ event.preventDefault(); go(index + 1); }}
   if (["ArrowLeft", "ArrowUp"].includes(event.key)) {{ event.preventDefault(); go(index - 1); }}
 }});
+window.addEventListener("hashchange", () => {{
+  const next = parseInt((location.hash || "#1").slice(1), 10);
+  if (!Number.isNaN(next)) go(next - 1);
+}});
 const start = parseInt((location.hash || "#1").slice(1), 10);
 if (!Number.isNaN(start)) go(start - 1);
 </script>

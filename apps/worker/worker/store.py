@@ -19,6 +19,7 @@ class StoreError(Exception):
 
 class S3Client(Protocol):
     def get_object(self, **kwargs: Any) -> dict[str, Any]: ...
+    def put_object(self, **kwargs: Any) -> dict[str, Any]: ...
 
 
 def download_file(
@@ -28,24 +29,11 @@ def download_file(
     access_key: str,
     secret_key: str,
     dest: Path,
+    region: str = "us-east-1",
     client: S3Client | None = None,
 ) -> Path:
     """Download one store object to dest. Returns dest."""
-    if client is None:
-        try:
-            import boto3
-        except ImportError as exc:
-            raise StoreError("boto3 is not installed") from exc
-        try:
-            client = boto3.client(
-                "s3",
-                endpoint_url=endpoint,
-                aws_access_key_id=access_key,
-                aws_secret_access_key=secret_key,
-                region_name="us-east-1",
-            )
-        except Exception as exc:
-            raise StoreError(f"cannot create store client: {exc}") from exc
+    client = _store_client(endpoint, access_key, secret_key, region, client)
     try:
         body = client.get_object(Bucket=bucket, Key=key)["Body"]
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -57,3 +45,79 @@ def download_file(
     except Exception as exc:
         raise StoreError(f"store download failed: {exc}") from exc
     return dest
+
+
+ARTIFACT_KINDS = {
+    "walkthrough.mp4": "video",
+    "deck.html": "deck",
+    "captions.vtt": "captions",
+    "edl.json": "edl",
+    "storyboard.html": "storyboard",
+    "guide.md": "guide",
+    "voiceover.mp3": "voiceover",
+    "source.mp4": "source",
+}
+
+CONTENT_TYPES = {
+    ".mp4": "video/mp4",
+    ".vtt": "text/vtt",
+    ".json": "application/json",
+    ".html": "text/html",
+    ".md": "text/markdown",
+    ".mp3": "audio/mpeg",
+}
+
+
+def artifact_kind(filename: str) -> str | None:
+    """Render output kind, or None for inputs and scratch (never persisted)."""
+    return ARTIFACT_KINDS.get(filename)
+
+
+def content_type_for(suffix: str) -> str:
+    return CONTENT_TYPES.get(suffix.lower(), "application/octet-stream")
+
+
+def upload_file(
+    endpoint: str,
+    bucket: str,
+    key: str,
+    access_key: str,
+    secret_key: str,
+    src: Path,
+    content_type: str,
+    region: str = "us-east-1",
+    client: S3Client | None = None,
+) -> int:
+    """Upload one file, streaming from disk. Returns bytes written."""
+    s3 = _store_client(endpoint, access_key, secret_key, region, client)
+    try:
+        with open(src, "rb") as handle:
+            s3.put_object(Bucket=bucket, Key=key, Body=handle, ContentType=content_type)
+    except Exception as exc:
+        raise StoreError(f"store upload failed: {exc}") from exc
+    return src.stat().st_size
+
+
+def _store_client(
+    endpoint: str,
+    access_key: str,
+    secret_key: str,
+    region: str,
+    client: S3Client | None,
+):
+    if client is not None:
+        return client
+    try:
+        import boto3
+    except ImportError as exc:
+        raise StoreError("boto3 is not installed") from exc
+    try:
+        return boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name=region,
+        )
+    except Exception as exc:
+        raise StoreError(f"cannot create store client: {exc}") from exc

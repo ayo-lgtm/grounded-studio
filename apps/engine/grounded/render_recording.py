@@ -208,17 +208,24 @@ def _render_mp4(
                 return error
             paths.append(clip)
         concat = work / "list.txt"
-        concat.write_text("".join(f"file '{path.as_posix()}'\n" for path in paths), encoding="utf-8")
+        concat.write_text(_concat_list(paths), encoding="utf-8")
         proc = subprocess.run(
-            [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(concat), "-c", "copy", str(dest)],
+            [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(concat.resolve()), "-c", "copy", str(dest)],
             capture_output=True, text=True,
         )
         if proc.returncode != 0:
             tail = (proc.stderr or "").strip().splitlines()
-            return tail[-1] if tail else "ffmpeg concat failed"
+            return " | ".join(tail[-3:]) if tail else "ffmpeg concat failed"
     finally:
         shutil.rmtree(work, ignore_errors=True)
     return None
+
+
+def _concat_list(paths: list[Path]) -> str:
+    # Absolute entries: some ffmpeg builds resolve relative concat entries
+    # against the list file's directory instead of the workdir, doubling
+    # the path. (-safe 0 already permits absolute paths.)
+    return "".join(f"file '{path.resolve().as_posix()}'\n" for path in paths)
 
 
 def _paint_card(ffmpeg: str, item: dict[str, Any], dest: Path, font: Path, ui: Path) -> str | None:
@@ -237,7 +244,7 @@ def _paint_card(ffmpeg: str, item: dict[str, Any], dest: Path, font: Path, ui: P
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         tail = (proc.stderr or "").strip().splitlines()
-        return tail[-1] if tail else "ffmpeg failed"
+        return " | ".join(tail[-3:]) if tail else "ffmpeg failed"
     return None
 
 
@@ -265,7 +272,7 @@ def _cut_source(
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         tail = (proc.stderr or "").strip().splitlines()
-        return tail[-1] if tail else "ffmpeg failed to cut the source"
+        return " | ".join(tail[-3:]) if tail else "ffmpeg failed to cut the source"
     return None
 
 

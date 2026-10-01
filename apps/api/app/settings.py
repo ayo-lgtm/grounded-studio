@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     minio_endpoint: str = "http://127.0.0.1:9000"
     minio_bucket: str = "grounded"
+    minio_region: str = "us-east-1"
     minio_access_key: str = "grounded"
     minio_secret_key: str = "change-me-too"
     model_base_url: str = ""

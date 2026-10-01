@@ -250,7 +250,11 @@ def _revise_polish(
         }
     if not notes:
         notes.append("Nothing to polish.")
-    return {"script": candidate, "notes": notes, "applied": True}
+    changed = any(
+        str(new.get("text") or "") != str(old.get("text") or "")
+        for new, old in zip(candidate.get("beats") or [], script.get("beats") or [])
+    )
+    return {"script": candidate, "notes": notes, "applied": changed}
 
 
 def _polish_problem(

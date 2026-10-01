@@ -21,7 +21,11 @@ class IngestError(Exception):
 
 
 def parse_docx(source: str | Path | bytes) -> dict[str, Any]:
-    """Parse a .docx file into a document pack for compile_document."""
+    """Parse a .docx file into a document pack for compile_document.
+
+    The first paragraph is the title and is not repeated as a slide.
+    A table row is one block, cells joined, so a header is not its own slide.
+    """
     try:
         if isinstance(source, bytes):
             archive = zipfile.ZipFile(io.BytesIO(source))
@@ -43,15 +47,52 @@ def parse_docx(source: str | Path | bytes) -> dict[str, Any]:
     body = root.find(f"{_W}body")
     if body is None:
         raise IngestError("docx has no document body")
-    blocks: list[dict[str, Any]] = []
-    for paragraph in body.iter(f"{_W}p"):
-        text = _paragraph_text(paragraph).strip()
-        if not text:
-            continue
-        blocks.append({"id": f"p{len(blocks) + 1}", "text": text, "role": "evidence"})
-    if not blocks:
+    pieces = _body_pieces(body)
+    if not pieces:
         raise IngestError("document has no readable text")
-    return {"title": blocks[0]["text"], "title_block": blocks[0]["id"], "blocks": blocks}
+    blocks = [
+        {"id": f"p{index}", "text": text, "role": _role(text)}
+        for index, text in enumerate(pieces[1:], start=2)
+    ]
+    return {"title": pieces[0], "title_block": "p1", "blocks": blocks}
+
+
+def _body_pieces(body: ET.Element) -> list[str]:
+    pieces: list[str] = []
+    for child in list(body):
+        if child.tag == f"{_W}p":
+            text = _paragraph_text(child).strip()
+            if text:
+                pieces.append(text)
+        elif child.tag == f"{_W}tbl":
+            pieces.extend(_table_rows(child))
+    return pieces
+
+
+def _table_rows(table: ET.Element) -> list[str]:
+    rows: list[str] = []
+    for row in table.findall(f"{_W}tr"):
+        cells: list[str] = []
+        for cell in row.findall(f"{_W}tc"):
+            bits = [
+                _paragraph_text(paragraph).strip()
+                for paragraph in cell.findall(f"{_W}p")
+            ]
+            text = " ".join(bit for bit in bits if bit).strip()
+            if text:
+                cells.append(text)
+        if cells:
+            rows.append(" ".join(cells))
+    return rows
+
+
+def _role(text: str) -> str:
+    lowered = text.strip().lower()
+    if lowered.startswith(("approve ", "ask ", "please approve", "request ")):
+        return "ask"
+    if lowered.startswith("risk"):
+        return "risk"
+    return "evidence"
 
 
 def _paragraph_text(paragraph: ET.Element) -> str:
