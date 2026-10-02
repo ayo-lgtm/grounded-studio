@@ -107,6 +107,7 @@ def _parse_xlsx(data: bytes) -> dict[str, Any]:
                             "target_addr": target_formula.coordinate,
                             "target_sheet": ws.title,
                             "target_display": _display(target_num, target_formula.number_format, _unit(target_formula.number_format)),
+                            "target_formula": target_formula.value if target_formula.data_type == "f" else None,
                         }
                     )
             kpis.append(item)
@@ -127,6 +128,8 @@ def _parse_xlsx(data: bytes) -> dict[str, Any]:
                             "prior_addr": prior_formula.coordinate,
                             "prior": prior_num,
                             "prior_display": _display(prior_num, prior_formula.number_format, _unit(prior_formula.number_format)),
+                            "formula": actual_formula.value if actual_formula.data_type == "f" else None,
+                            "prior_formula": prior_formula.value if prior_formula.data_type == "f" else None,
                             "unit": unit,
                         }
                     )
