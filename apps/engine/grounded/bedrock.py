@@ -38,14 +38,9 @@ class BedrockChat:
     def _client_or_create(self) -> ConverseClient:
         if self._client is not None:
             return self._client
-        try:
-            import boto3  # lazy: engine stays dependency-light for tests
-        except ImportError as exc:
-            raise BedrockError("boto3 is not installed") from exc
-        try:
-            return boto3.client("bedrock-runtime", region_name=self.region)  # type: ignore[return-value]
-        except Exception as exc:
-            raise BedrockError(f"cannot create bedrock-runtime client: {exc}") from exc
+        raise BedrockError(
+            "public Bedrock chat is disabled; answers stay on local retrieval"
+        )
 
     def complete(self, system: str, prompt: str, max_tokens: int = 1024) -> str:
         try:

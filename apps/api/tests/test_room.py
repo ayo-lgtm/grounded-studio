@@ -69,6 +69,12 @@ class RoomPageTest(unittest.TestCase):
         found = set(re.findall(r"#[0-9a-fA-F]{3,8}", self.html))
         self.assertEqual(found, HOUSE)
 
+    def test_docs_page_does_not_load_a_cdn(self):
+        main = (ROOM.parent / "main.py").read_text(encoding="utf-8")
+        self.assertIn("docs_url=None", main)
+        self.assertNotIn("jsdelivr", main)
+        self.assertNotIn("swagger", main.lower())
+
     def test_no_foreign_chrome(self):
         lowered = self.html.lower()
         self.assertNotIn("linear-gradient", lowered)

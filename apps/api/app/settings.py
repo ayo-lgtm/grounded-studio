@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     minio_secret_key: str = "change-me-too"
     model_base_url: str = ""
     model_name: str = "local-instruct"
+    egress_mode: str = "offline"
     dev_bypass_auth: bool = True
     dev_user_email: str = "dev@internal"
 

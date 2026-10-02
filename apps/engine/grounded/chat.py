@@ -60,6 +60,37 @@ _SYSTEM = (
 )
 
 
+def answer_grounded(
+    script: dict[str, Any],
+    question: str,
+    *,
+    briefing_id: str | None = None,
+    db: Any = None,
+) -> dict[str, Any]:
+    """Cite a briefing beat, else a local doc or skill chunk. No public model."""
+    from .knowledge import rephrase_private, search_knowledge, search_vectors
+
+    base = answer(script, question)
+    if not base["refused"]:
+        text = rephrase_private(str(base["text"]), question) or base["text"]
+        return {**base, "text": text, "provider": "retrieval", "claude": False}
+    hits = search_vectors(db, briefing_id or "", question)
+    if not hits:
+        hits = search_knowledge(question)
+    if not hits:
+        return {**base, "provider": "retrieval", "claude": False}
+    passage = hits[0]["text"]
+    text = rephrase_private(passage, question) or passage
+    return {
+        "refused": False,
+        "text": text,
+        "citations": [{"kind": "document", "block_id": hits[0]["path"]}],
+        "ord": None,
+        "provider": "retrieval",
+        "claude": False,
+    }
+
+
 def answer_with_claude(
     script: dict[str, Any], question: str, client: Any = None
 ) -> dict[str, Any]:

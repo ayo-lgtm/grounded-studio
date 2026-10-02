@@ -5,5 +5,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY apps/api/app ./app
 COPY apps/engine/grounded ./grounded
 COPY schema/schema.sql ./schema.sql
+COPY skills ./skills
+COPY docs ./docs
+COPY README.md ./README.md
+ENV EGRESS_MODE=offline
 EXPOSE 8000
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

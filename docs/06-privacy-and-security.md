@@ -4,7 +4,7 @@ This product only exists if security will let employees use it.
 
 ## Egress
 
-Workers have no default route to the public internet. Allowlist: internal IdP, internal artifact registry, internal syslog. Model weights are preloaded. Compile-time web research is disabled.
+Workers have no default route to the public internet. Allowlist: internal IdP, internal artifact registry, internal syslog, and in-network Postgres, Redis, and MinIO. Model weights are preloaded. Compile-time web research is disabled. Bedrock, Polly, Transcribe, and public object stores fail closed. `/health` reports `offline` or `blocked`. See [17](17-offline-egress.md).
 
 ## Identity and ACL
 

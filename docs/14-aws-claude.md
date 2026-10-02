@@ -1,8 +1,9 @@
 # 14 — AWS internal runbook (EC2 + Bedrock Claude)
 
+Closed. Chat, transcription, and narration do not call Bedrock, Transcribe, or Polly. The default is `EGRESS_MODE=offline`. See [17](17-offline-egress.md). The steps below are a historical pilot record. They are not the offline profile.
+
 Single EC2 box running `infra/compose.yaml`: Postgres (pgvector), Redis,
-MinIO, API, worker. AI comes from Bedrock Claude in-region; transcription
-from AWS Transcribe; narration from Amazon Polly.
+MinIO, API, worker. The live path is local retrieval, faster-whisper, and Piper or Kokoro. The paragraphs under the decision record describe the retired AWS pilot.
 
 ## Decision record
 

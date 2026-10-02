@@ -48,10 +48,8 @@ services:
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-grounded}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in Coolify}
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      CLAUDE_MODEL_ID: ${CLAUDE_MODEL_ID:-anthropic.claude-3-5-sonnet-20241022-v2:0}
+      EGRESS_MODE: ${EGRESS_MODE:-offline}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-}
     expose:
       - "8000"
     depends_on:
@@ -74,15 +72,13 @@ services:
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-grounded}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in Coolify}
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      CLAUDE_MODEL_ID: ${CLAUDE_MODEL_ID:-anthropic.claude-3-5-sonnet-20241022-v2:0}
-      TRANS_PROVIDER: ${TRANS_PROVIDER:-stub}
-      TRANS_S3_BUCKET: ${TRANS_S3_BUCKET:-}
+      EGRESS_MODE: ${EGRESS_MODE:-offline}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-}
+      TRANS_PROVIDER: ${TRANS_PROVIDER:-local}
       TRANS_LANGUAGE: ${TRANS_LANGUAGE:-en-US}
-      NARRATION_PROVIDER: ${NARRATION_PROVIDER:-}
-      NARRATION_VOICE: ${NARRATION_VOICE:-}
+      NARRATION_PROVIDER: ${NARRATION_PROVIDER:-local}
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
     depends_on:
       postgres:
         condition: service_healthy

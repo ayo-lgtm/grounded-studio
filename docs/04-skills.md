@@ -133,8 +133,29 @@ v1.5 names `path-replay`, `exec-narrative`, and `launch-teaser` stay in the list
 | `wbr-ask-pack` | One ask slide per row on the ask sheet, with the owner only when that cell is filled. |
 | `wbr-commentary-lock` | Allow narrative sentences only from commentary cells, and numbers only from numeric cells. |
 
+### Continuity and offline studio
+
+Original playbooks for carry-boundary continuity, a local quality gate, placement formats, and house brand lock. They do not call Scenario, and they do not copy the continuous-take project whose license forbids commercial use.
+
+| Skill | Summary |
+|---|---|
+| `continuous-take-demo` | One take from a real capture. Every beat boundary keeps a survivor. |
+| `carry-boundary-verify` | Fail when a boundary drops the picture. |
+| `offline-quality-gate` | Pass, warn, or fail before a share link. |
+| `offline-refine-loop` | Map a finding to a local fix: trim, duck, recaption, carry-hold, or fail closed. |
+| `placement-formats-export` | 16:9, 9:16, and 1:1 from the master with a safe zone. |
+| `brand-kit-lock` | Palette and type from `house.py` only. |
+| `storyboard-from-chapters` | One panel per cited chapter, source order. |
+| `text-overlay-cards` | House labels composited on the source frame. |
+| `local-video-assembly` | Concat the EDL with local ffmpeg. |
+| `caption-studio-local` | Captions from local faster-whisper. |
+| `identity-consistency-lock` | Screen labels actually seen on the capture. |
+| `narration-room-mix` | Local Piper or Kokoro, loudness, duck, short room. |
+
+Crafts for this section: `carry-boundary`, `quality-gate`, `refine-loop`, `placement-formats`, `brand-kit`.
+
 ### Crafts
 
-Shared modules live under `skills/_crafts/`. New or rewritten for this expansion: `edl-cut`, `caption-track`, `frame-still`, `local-ocr`, `av-sync`, `citation-footer`, `redaction-mask`, `wbr-spine`, `slideshow-advance`, `duck-mix`, `screen-ingest`. Existing crafts keep their jobs and now declare `offline: true`.
+Shared modules live under `skills/_crafts/`. New or rewritten for this expansion: `edl-cut`, `caption-track`, `frame-still`, `local-ocr`, `av-sync`, `citation-footer`, `redaction-mask`, `wbr-spine`, `slideshow-advance`, `duck-mix`, `screen-ingest`, `carry-boundary`, `quality-gate`, `refine-loop`, `placement-formats`, `brand-kit`. Existing crafts keep their jobs and now declare `offline: true`.
 
-Expansion count: **55** skills.
+Expansion count: **67** skills (55 plus the 12 continuity and offline-studio skills above). The v1 list is unchanged.
