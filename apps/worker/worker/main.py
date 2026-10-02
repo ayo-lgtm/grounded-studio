@@ -273,7 +273,9 @@ def compile_script(db, briefing_id: str) -> None:
             "raw": json.dumps(script),
         },
     )
+    asset_ids = _citation_asset_ids(db, briefing_id)
     for beat in script["beats"]:
+        beat_id = str(uuid.uuid4())
         db.execute(
             text(
                 """
@@ -282,7 +284,7 @@ def compile_script(db, briefing_id: str) -> None:
                 """
             ),
             {
-                "id": str(uuid.uuid4()),
+                "id": beat_id,
                 "script_id": script_id,
                 "ord": beat["ord"],
                 "kind": beat["kind"],
@@ -290,6 +292,32 @@ def compile_script(db, briefing_id: str) -> None:
                 "visual": json.dumps({"layout": beat.get("layout")}),
             },
         )
+        for cite in beat.get("citations") or []:
+            asset_id = asset_ids.get(cite.get("kind"))
+            if not asset_id:
+                raise RuntimeError(f"no source asset for {cite.get('kind')} citation")
+            db.execute(
+                text(
+                    """
+                    INSERT INTO citations
+                      (id, beat_id, asset_id, kind, t_start_ms, t_end_ms, sheet, addr, block_id)
+                    VALUES
+                      (:id, :beat_id, :asset_id, CAST(:kind AS citation_kind),
+                       :t_start_ms, :t_end_ms, :sheet, :addr, :block_id)
+                    """
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "beat_id": beat_id,
+                    "asset_id": asset_id,
+                    "kind": cite.get("kind"),
+                    "t_start_ms": cite.get("t_start_ms"),
+                    "t_end_ms": cite.get("t_end_ms"),
+                    "sheet": cite.get("sheet"),
+                    "addr": cite.get("addr"),
+                    "block_id": cite.get("block_id"),
+                },
+            )
     db.execute(
         text("UPDATE briefings SET state = 'review' WHERE id = :id"),
         {"id": briefing_id},
@@ -402,6 +430,22 @@ def _persist_artifacts(db, briefing_id: str, out: Path) -> None:
                 "bytes": size,
             },
         )
+
+def _citation_asset_ids(db, briefing_id: str) -> dict[str, str]:
+    rows = db.execute(
+        text(
+            """
+            SELECT DISTINCT ON (kind) kind, id
+            FROM source_assets
+            WHERE briefing_id = :id AND kind IN ('recording', 'workbook', 'document')
+            ORDER BY kind, created_at DESC
+            """
+        ),
+        {"id": briefing_id},
+    ).all()
+    return {str(kind): str(asset_id) for kind, asset_id in rows}
+
+
 
 def _bytes_for_asset(key: str, filename: str | None) -> bytes:
     import tempfile
