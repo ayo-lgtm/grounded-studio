@@ -1,5 +1,6 @@
 # skill: half-year-business-review
 version: 1.0.0
+offline: true
 job: Explain H1/H2 or first-half performance from one or more workbooks and supporting documents without losing period comparability.
 
 inputs_required:
