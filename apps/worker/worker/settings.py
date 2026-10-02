@@ -9,15 +9,22 @@ class Settings(BaseSettings):
     minio_region: str = "us-east-1"
     minio_access_key: str = "grounded"
     minio_secret_key: str = "change-me-too"
+
     model_base_url: str = ""
     model_name: str = "local-instruct"
-    whisper_model: str = "medium"
-    aws_region: str = "us-east-1"
+
+    # Recording transcription is local-only. A model path must already exist
+    # on the private host; the worker never downloads a model at runtime.
     trans_provider: str = "stub"
-    trans_s3_bucket: str = ""
-    trans_language: str = "en-US"
-    trans_timeout_s: int = 1800
+    whisper_model_path: str = ""
+    whisper_device: str = "cpu"
+    trans_language: str = "en"
+
+    # Narration is local-only. Configure Piper paths to enable it.
     narration_provider: str = ""
+    piper_bin: str = "piper"
+    piper_model_path: str = ""
+
     artifact_dir: str = "out/jobs"
 
     class Config:
