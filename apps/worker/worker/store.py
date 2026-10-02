@@ -10,6 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol
 
+from grounded.network_policy import assert_internal_url
+
 _CHUNK = 1024 * 1024
 
 
@@ -107,6 +109,7 @@ def _store_client(
 ):
     if client is not None:
         return client
+    assert_internal_url(endpoint, "MINIO_ENDPOINT")
     try:
         import boto3
     except ImportError as exc:
