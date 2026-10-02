@@ -136,6 +136,28 @@ td {{
 }}
 td.num, th.num {{ text-align: right; font-family: var(--title); }}
 td.down {{ color: var(--negative); }}
+.source-range h1 {{ font-size: 30px; }}
+.source-range .lead {{ margin-top: 10px; font-size: 16px; color: var(--muted); }}
+.source-table {{
+  margin-top: 14px;
+  overflow: auto;
+  border: 1px solid var(--rule);
+}}
+.source-table table {{ margin-top: 0; table-layout: auto; }}
+.source-table th {{
+  position: sticky;
+  top: 0;
+  background: var(--paper);
+  padding: 8px 10px;
+  font-size: 11px;
+  white-space: nowrap;
+}}
+.source-table td {{
+  padding: 8px 10px;
+  font-size: 15px;
+  white-space: nowrap;
+}}
+.source-table .source-cell {{ border-right: 1px solid var(--rule); }}
 .footer {{
   margin-top: auto;
   padding-top: 12px;
