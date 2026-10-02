@@ -1,0 +1,23 @@
+name: engine-tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install engine runtime dependencies
+        run: pip install -r apps/worker/requirements.txt
+      - name: Run engine tests
+        env:
+          PYTHONPATH: apps/engine
+          GROUNDED_SKILLS_ROOT: skills
+        run: python -m unittest discover -s apps/engine/tests -p "test_*.py" -v
