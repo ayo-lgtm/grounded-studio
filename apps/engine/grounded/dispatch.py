@@ -11,10 +11,15 @@ from .continuity import verify_carry
 from .formats import placement_plan
 from .layouts import SKILL_RENDERER, SLIDESHOW_SKILLS
 from .quality import gate_script, refine_actions
+from .ingest_workbook import parse_workbook
+from .skill_registry import SkillRegistryError, execution_provenance
 
 WORKBOOK_SKILLS = frozenset(
     {
         "weekly-ops-review",
+        "finance-wbr",
+        "half-year-business-review",
+        "executive-business-review",
         "wbr-kpi-spine",
         "wbr-executive",
         "wbr-ops-deep-dive",
@@ -78,17 +83,19 @@ def compile_for_skill(
     else:
         chosen = skill_id
 
-    if chosen in WORKBOOK_SKILLS or (
-        workbook and not document and chosen not in sources.DOCUMENT_SKILLS and not spoken
+    if workbook and (
+        chosen in WORKBOOK_SKILLS
+        or (not document and chosen not in sources.DOCUMENT_SKILLS and not spoken)
     ):
-        if not workbook:
-            raise CompileError([f"{skill_id} needs a workbook JSON upload"])
-        pack = sources.load_json(workbook, "workbook")
+        pack = parse_workbook(workbook)
         target = chosen if chosen in WORKBOOK_SKILLS else "weekly-ops-review"
         script = specialize_workbook(pack, target)
         _finish(script, skill_id if skill_id in FLEX else target, pack)
         _approve(script, cells=cell_index(pack))
         return script
+
+    if chosen in WORKBOOK_SKILLS and chosen != "executive-business-review" and not workbook:
+        raise CompileError([f"{skill_id} needs a workbook upload"])
 
     if document and (chosen in sources.DOCUMENT_SKILLS or not spoken):
         doc_skill = chosen if chosen in sources.DOCUMENT_SKILLS else "leadership-brief"
@@ -117,15 +124,15 @@ def compile_for_skill(
 
     if skill_id in RECORDING_SKILLS:
         raise CompileError(["transcribe first"])
-    raise CompileError(["upload a workbook JSON or a .docx before compile"])
+    raise CompileError(["upload a workbook, PDF/DOCX, or recording before compile"])
 
 
 def specialize_workbook(pack: dict[str, Any], skill_id: str) -> dict[str, Any]:
     """Build the full cited deck, then narrow. Empty required KPIs fail first."""
     full = compile_workbook(pack, "weekly-ops-review")
-    if skill_id in {"weekly-ops-review", "wbr-kpi-spine", "wbr-ops-deep-dive", "brand-kit-lock"}:
+    if skill_id in {"weekly-ops-review", "finance-wbr", "half-year-business-review", "wbr-kpi-spine", "wbr-ops-deep-dive", "brand-kit-lock"}:
         beats = list(full["beats"])
-    elif skill_id == "wbr-executive":
+    elif skill_id in {"wbr-executive", "executive-business-review"}:
         beats = _executive(full, pack)
     elif skill_id == "wbr-ask-pack":
         beats = _keep(full, {"cover", "ask"})
@@ -149,7 +156,7 @@ def specialize_workbook(pack: dict[str, Any], skill_id: str) -> dict[str, Any]:
         beats = list(full["beats"])
     if skill_id == "kpi-spotlight-deck" and len(beats) > 16:
         raise CompileError(["kpi-spotlight-deck stops at 16 slides"])
-    if skill_id == "wbr-executive" and len(beats) > 6:
+    if skill_id in {"wbr-executive", "executive-business-review"} and len(beats) > 6:
         raise CompileError(["wbr-executive keeps at most 6 slides"])
     script = dict(full)
     script["beats"] = []
@@ -206,6 +213,14 @@ def _keep(full: dict[str, Any], layouts: set[str]) -> list[dict[str, Any]]:
 
 def _finish(script: dict[str, Any], skill_id: str, pack: dict[str, Any] | None) -> None:
     script["skill_id"] = skill_id
+    try:
+        provenance = execution_provenance(skill_id)
+    except SkillRegistryError as exc:
+        raise CompileError([str(exc)]) from exc
+    script["skill_version"] = str(provenance["skill_version"])
+    script["provenance"] = provenance
+    script["skill_contract"] = provenance.get("contract_text") or ""
+    script["craft_contracts"] = provenance.get("craft_contracts") or {}
     if skill_id in SKILL_RENDERER:
         script["renderer"] = SKILL_RENDERER[skill_id]
     report = gate_script(script, cells=cell_index(pack) if pack else None)
