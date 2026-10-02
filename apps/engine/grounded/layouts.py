@@ -6,6 +6,7 @@ DECK_LAYOUTS = frozenset(
         "big-number",
         "versus-target",
         "movers",
+        "source-range",
         "risk",
         "ask",
         "statement",
@@ -19,7 +20,7 @@ ALL_LAYOUTS = DECK_LAYOUTS | RECORDING_LAYOUTS
 
 SKILL_LAYOUTS = {
     "weekly-ops-review": frozenset(
-        {"cover", "big-number", "versus-target", "movers", "risk", "ask"}
+        {"cover", "big-number", "versus-target", "movers", "source-range", "risk", "ask"}
     ),
     "leadership-brief": frozenset({"cover", "statement", "risk", "ask"}),
     "launch-announcement": frozenset({"cover", "statement", "ask"}),
