@@ -1,5 +1,6 @@
 # craft: chart-selection
 version: 1.0.0
+offline: true
 used_by: weekly-ops-review, finance-wbr, half-year-business-review, executive-business-review, leadership-brief
 
 job: Choose the simplest visual that answers the analytical question while preserving source truth.
