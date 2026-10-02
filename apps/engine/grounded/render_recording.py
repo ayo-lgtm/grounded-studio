@@ -47,6 +47,9 @@ def render_edit(
 
 
 def timeline(script: dict[str, Any]) -> list[dict[str, Any]]:
+    continuity = (script.get("edit") or {}).get("continuity") or {}
+    if continuity.get("mode") == "carry-boundary":
+        return _carry_timeline(script)
     items: list[dict[str, Any]] = []
     last_screen = None
     clock = 0
@@ -68,6 +71,60 @@ def timeline(script: dict[str, Any]) -> list[dict[str, Any]]:
             {
                 "type": "cut",
                 "title": screen,
+                "text": cut.get("text") or "",
+                "src_in_ms": cut["src_in_ms"],
+                "src_out_ms": cut["src_out_ms"],
+                "out_in_ms": clock,
+                "duration_ms": duration,
+                "zoom": cut.get("zoom"),
+            }
+        )
+        clock += duration
+    for beat in script.get("beats") or []:
+        if beat.get("layout") != "statement":
+            continue
+        items.append(
+            {
+                "type": "note",
+                "title": beat.get("text") or "",
+                "out_in_ms": clock,
+                "duration_ms": 2800,
+            }
+        )
+        clock += 2800
+    return items
+
+
+def _carry_timeline(script: dict[str, Any]) -> list[dict[str, Any]]:
+    """Hold the outgoing frame across the boundary instead of a blank chapter card."""
+    items: list[dict[str, Any]] = []
+    clock = 0
+    cuts = list((script.get("edit") or {}).get("cuts") or [])
+    for index, cut in enumerate(cuts):
+        if index:
+            previous = cuts[index - 1]
+            carry = cut.get("carry") or {}
+            hold = int(carry.get("hold_ms") or 480)
+            src_out = int(previous["src_out_ms"])
+            src_in = max(int(previous["src_in_ms"]), src_out - 80)
+            items.append(
+                {
+                    "type": "carry",
+                    "title": (cut.get("screen") or previous.get("screen") or "Continue"),
+                    "survivor": carry.get("survivor") or previous.get("screen") or "outgoing-frame",
+                    "text": "",
+                    "src_in_ms": src_in,
+                    "src_out_ms": src_out,
+                    "out_in_ms": clock,
+                    "duration_ms": hold,
+                }
+            )
+            clock += hold
+        duration = int(cut["src_out_ms"]) - int(cut["src_in_ms"])
+        items.append(
+            {
+                "type": "cut",
+                "title": (cut.get("screen") or "").strip(),
                 "text": cut.get("text") or "",
                 "src_in_ms": cut["src_in_ms"],
                 "src_out_ms": cut["src_out_ms"],
@@ -124,6 +181,12 @@ def _storyboard(script: dict[str, Any], items: list[dict[str, Any]]) -> str:
         elif item["type"] == "note":
             body = (
                 f'<p class="eyebrow">What changed</p><h1>{html.escape(item["title"])}</h1>'
+            )
+        elif item["type"] == "carry":
+            body = (
+                f'<p class="eyebrow">Carry</p>'
+                f'<h1 class="screen">{html.escape(str(item.get("title") or ""))}</h1>'
+                f'<p class="lead">Survivor: {html.escape(str(item.get("survivor") or ""))}</p>'
             )
         else:
             zoom = item.get("zoom")
@@ -202,6 +265,8 @@ def _render_mp4(
             clip = work / f"clip{index:02d}.mp4"
             if item["type"] == "cut" and source is not None:
                 error = _cut_source(ffmpeg, source, item, clip, font, ui)
+            elif item["type"] == "carry" and source is not None:
+                error = _hold_carry(ffmpeg, source, item, clip, font, ui)
             else:
                 error = _paint_card(ffmpeg, item, clip, font, ui)
             if error:
@@ -238,7 +303,7 @@ def _paint_card(ffmpeg: str, item: dict[str, Any], dest: Path, font: Path, ui: P
         "-shortest",
         "-t", f"{seconds:.3f}",
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
+        "-c:a", "aac", "-ar", "48000", "-ac", "2",
         str(dest),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -266,13 +331,48 @@ def _cut_source(
         "-vf", _caption_over_source(item, font, ui),
         "-r", "30",
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
+        "-c:a", "aac", "-ar", "48000", "-ac", "2",
         str(dest),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         tail = (proc.stderr or "").strip().splitlines()
         return " | ".join(tail[-3:]) if tail else "ffmpeg failed to cut the source"
+    return None
+
+
+def _hold_carry(
+    ffmpeg: str,
+    source: Path,
+    item: dict[str, Any],
+    dest: Path,
+    font: Path,
+    ui: Path,
+) -> str | None:
+    """Freeze the outgoing source frame and label the next beat on top of it."""
+    start = int(item["src_in_ms"]) / 1000
+    seconds = max(int(item["duration_ms"]), 200) / 1000
+    title = _esc(str(item.get("title") or item.get("survivor") or ""))
+    ui_path = _filter_path(ui)
+    draw = (
+        f"drawtext=fontfile='{ui_path}':text='{title}':fontsize=42:"
+        f"fontcolor={_ff(CAPTION_INK)}:box=1:boxcolor={_ff(CAPTION)}@0.72:boxborderw=16:x=80:y=72"
+    )
+    cmd = [
+        ffmpeg, "-y",
+        "-ss", f"{start:.3f}", "-t", "0.08", "-i", str(source),
+        "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+        "-vf", f"tpad=stop_mode=clone:stop_duration={seconds:.3f},{draw}",
+        "-r", "30",
+        "-t", f"{seconds:.3f}",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-ar", "48000", "-ac", "2",
+        str(dest),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        tail = (proc.stderr or "").strip().splitlines()
+        return " | ".join(tail[-3:]) if tail else "ffmpeg failed to hold the carry frame"
     return None
 
 

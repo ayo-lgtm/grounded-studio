@@ -62,7 +62,9 @@ Cloud SaaS video models (Veo, Runway, HeyGen, BookWatch-style generators) are **
 
 ## Status
 
-House style, both renderers, and the v1 skill compilers live in `apps/engine`.
+House style, both renderers, and the skill compilers live in `apps/engine`.
+Chat answers from the briefing or from `docs/` and `skills/` on disk. Narration is local Piper or Kokoro. Transcription is local faster-whisper. `/health` reports `egress: offline` when object storage is on a private host. See [docs/17-offline-egress.md](docs/17-offline-egress.md).
+
 A local run writes decks and edit lists to `out/demo`:
 
 ```bash

@@ -6,7 +6,8 @@ import re
 from typing import Any
 
 from .compile_deck import CompileError
-from .layouts import SKILL_RENDERER
+from .continuity import apply_carry
+from .layouts import SKILL_RENDERER, SLIDESHOW_SKILLS
 from .numbers import parse_numbers
 
 _FILLER = re.compile(r"^(um+|uh+|er+|hmm+)\.?$", re.IGNORECASE)
@@ -16,6 +17,7 @@ def compile_recording(
     segments: list[dict[str, Any]],
     skill_id: str = "product-walkthrough",
     title: str = "Walkthrough",
+    carry: bool | None = None,
 ) -> dict[str, Any]:
     kept = [segment for segment in segments if _keep(segment)]
     if not kept:
@@ -70,6 +72,10 @@ def compile_recording(
     for index, beat in enumerate(beats, start=1):
         beat["ord"] = index
         script["beats"].append(beat)
+    if carry is None:
+        carry = skill_id not in SLIDESHOW_SKILLS
+    if carry:
+        apply_carry(script)
     return script
 
 
@@ -139,6 +145,7 @@ def compile_delta(
     for index, beat in enumerate(beats, start=1):
         beat["ord"] = index
         merged["beats"].append(beat)
+    apply_carry(merged)
     return merged
 
 

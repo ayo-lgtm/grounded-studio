@@ -1,5 +1,6 @@
-# Private deployment only. All data services and AI providers remain on this
-# internal Docker/network boundary. Public/cloud model egress is prohibited.
+# Pilot deploy on an internal box (single host).
+# Default is offline: in-network MinIO, local faster-whisper, local Piper.
+# Do not point chat, TTS, or ASR at Bedrock, Transcribe, or Polly.
 
 services:
   postgres:
@@ -50,7 +51,8 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change-me-too}
       MINIO_BUCKET: ${MINIO_BUCKET:-grounded}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
-      GROUND_ALLOW_PUBLIC_EGRESS: "false"
+      EGRESS_MODE: ${EGRESS_MODE:-offline}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -70,19 +72,18 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-grounded}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-grounded}
       REDIS_URL: redis://redis:6379/0
+      EGRESS_MODE: ${EGRESS_MODE:-offline}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-}
       MINIO_ENDPOINT: http://minio:9000
       MINIO_BUCKET: ${MINIO_BUCKET:-grounded}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-grounded}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change-me-too}
-      TRANS_PROVIDER: ${TRANS_PROVIDER:-stub}
-      WHISPER_MODEL_PATH: ${WHISPER_MODEL_PATH:-}
-      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
-      TRANS_LANGUAGE: ${TRANS_LANGUAGE:-en}
-      NARRATION_PROVIDER: ${NARRATION_PROVIDER:-}
-      PIPER_BIN: ${PIPER_BIN:-piper}
-      PIPER_MODEL_PATH: ${PIPER_MODEL_PATH:-}
-      GROUND_ALLOW_PUBLIC_EGRESS: "false"
+      TRANS_PROVIDER: ${TRANS_PROVIDER:-local}
+      TRANS_LANGUAGE: ${TRANS_LANGUAGE:-en-US}
+      NARRATION_PROVIDER: ${NARRATION_PROVIDER:-local}
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
     depends_on:
       postgres:
         condition: service_healthy

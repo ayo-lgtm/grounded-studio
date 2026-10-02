@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from pathlib import Path
@@ -18,25 +19,46 @@ from .db import get_db, ping
 from .queue import enqueue, new_id
 from .ranges import content_type, slice_body
 from .settings import settings
-from .storage import put_fileobj, read_bytes, signed_url
-from .validation import UploadTooLarge, hash_limited, is_allowed_kind, sanitize_filename
-from grounded.network_policy import assert_private_runtime
+from .storage import put_bytes, read_bytes, signed_url
+from .validation import UploadTooLarge, is_allowed_kind, read_limited, sanitize_filename
 
 _ROOM = (Path(__file__).resolve().parent / "room.html").read_text(encoding="utf-8")
-
-assert_private_runtime(
-    ("DATABASE_URL", settings.database_url),
-    ("REDIS_URL", settings.redis_url),
-    ("MINIO_ENDPOINT", settings.minio_endpoint),
-    ("MODEL_BASE_URL", settings.model_base_url),
-)
 
 
 def _require_dev_auth() -> None:
     if not settings.dev_bypass_auth:
         raise HTTPException(501, "SSO auth is not wired yet")
 
-app = FastAPI(title="Grounded Studio", version="0.1.0")
+app = FastAPI(
+    title="Grounded Studio",
+    version="0.1.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
+
+_LOCAL_DOCS = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Grounded API</title>
+<style>
+body { margin: 2rem; font-family: Georgia, serif; background: #f3f0e8; color: #1a1814; }
+code { font-family: ui-monospace, monospace; }
+</style></head>
+<body>
+<h1>Grounded API</h1>
+<p>Offline reference. This page does not load a hosted API console.</p>
+<ul>
+<li><code>GET /health</code> egress mode</li>
+<li><code>GET /api/v1/skills</code> on-disk skill catalog</li>
+<li><code>POST /api/v1/briefings</code> create a briefing</li>
+<li><code>POST /api/v1/briefings/{id}/assets</code> upload</li>
+<li><code>POST /api/v1/briefings/{id}/jobs</code> transcribe, compile, render, index</li>
+<li><code>GET /api/v1/briefings/{id}/script</code></li>
+<li><code>POST /api/v1/briefings/{id}/chat</code> local retrieval</li>
+<li><code>POST /api/v1/help/chat</code> how to use the tool</li>
+<li><code>GET /api/v1/artifacts/{id}/file</code> watchable file</li>
+</ul>
+</body></html>
+"""
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1:3000", "http://localhost:3000"],
@@ -61,8 +83,14 @@ class ChatIn(BaseModel):
 
 @app.get("/health")
 def health():
-    ok = ping()
-    return {"ok": ok, "egress": "public-blocked", "chat": "grounded-retrieval-only"}
+    from grounded.egress import health_report
+
+    return health_report(ping(), settings.minio_endpoint)
+
+
+@app.get("/docs", include_in_schema=False)
+def local_docs():
+    return HTMLResponse(_LOCAL_DOCS, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/")
@@ -70,36 +98,9 @@ def room():
     return HTMLResponse(_ROOM, headers={"Cache-Control": "no-store"})
 
 
-@app.get("/api/v1/skills")
-def list_skills():
-    from grounded.skill_registry import SkillRegistryError, catalog
-
-    try:
-        contracts = catalog()
-    except SkillRegistryError as exc:
-        raise HTTPException(503, str(exc)) from exc
-    return {
-        "skills": [
-            {
-                "id": contract.id,
-                "version": contract.version,
-                "job": contract.job,
-                "crafts": list(contract.crafts),
-            }
-            for contract in contracts
-        ]
-    }
-
-
 @app.post("/api/v1/briefings")
 def create_briefing(body: BriefingIn, db: Session = Depends(get_db)):
-    from grounded.skill_registry import SkillRegistryError, resolve_skill
-
     _require_dev_auth()
-    try:
-        contract, _crafts = resolve_skill(body.skill_id)
-    except SkillRegistryError as exc:
-        raise HTTPException(400, str(exc)) from exc
     briefing_id = new_id()
     project_id = body.project_id or _ensure_dev_project(db)
     db.execute(
@@ -108,7 +109,7 @@ def create_briefing(body: BriefingIn, db: Session = Depends(get_db)):
             INSERT INTO briefings
               (id, project_id, title, state, skill_id, skill_version, language, created_by)
             VALUES
-              (:id, :project_id, :title, 'draft', :skill_id, :skill_version, 'en', :user_id)
+              (:id, :project_id, :title, 'draft', :skill_id, '1.0.0', 'en', :user_id)
             """
         ),
         {
@@ -116,22 +117,15 @@ def create_briefing(body: BriefingIn, db: Session = Depends(get_db)):
             "project_id": project_id,
             "title": body.title,
             "skill_id": body.skill_id,
-            "skill_version": contract.version,
             "user_id": _dev_user(db),
         },
     )
     db.commit()
-    return {
-        "id": briefing_id,
-        "state": "draft",
-        "skill_id": body.skill_id,
-        "skill_version": contract.version,
-    }
+    return {"id": briefing_id, "state": "draft", "skill_id": body.skill_id}
 
 
 @app.get("/api/v1/briefings")
 def list_briefings(db: Session = Depends(get_db)):
-    _require_dev_auth()
     rows = db.execute(
         text(
             """
@@ -147,7 +141,6 @@ def list_briefings(db: Session = Depends(get_db)):
 
 @app.get("/api/v1/briefings/{briefing_id}")
 def get_briefing(briefing_id: str, db: Session = Depends(get_db)):
-    _require_dev_auth()
     row = db.execute(
         text("SELECT id, title, state, skill_id, language FROM briefings WHERE id = :id"),
         {"id": briefing_id},
@@ -179,14 +172,14 @@ async def upload_asset(
     if not is_allowed_kind(kind):
         raise HTTPException(400, f"unknown asset kind {kind}")
     try:
-        size, digest = await hash_limited(file.read)
+        data = await read_limited(file.read)
     except UploadTooLarge as exc:
         raise HTTPException(413, str(exc))
-    await file.seek(0)
+    digest = hashlib.sha256(data).hexdigest()
     asset_id = new_id()
     safe_name = sanitize_filename(file.filename)
     key = f"briefings/{briefing_id}/{asset_id}/{safe_name}"
-    put_fileobj(key, file.file, file.content_type or "application/octet-stream")
+    put_bytes(key, data, file.content_type or "application/octet-stream")
     db.execute(
         text(
             """
@@ -202,19 +195,19 @@ async def upload_asset(
             "kind": kind,
             "filename": safe_name,
             "mime": file.content_type or "application/octet-stream",
-            "bytes": size,
+            "bytes": len(data),
             "sha256": digest,
             "key": key,
         },
     )
     db.commit()
-    return {"id": asset_id, "sha256": digest, "bytes": size}
+    return {"id": asset_id, "sha256": digest, "bytes": len(data)}
 
 
 @app.post("/api/v1/briefings/{briefing_id}/jobs")
 def start_job(briefing_id: str, body: JobIn, db: Session = Depends(get_db)):
     _require_dev_auth()
-    allowed = {"ingest", "parse", "transcribe", "compile", "qa", "render", "index"}
+    allowed = {"ingest", "transcribe", "compile", "qa", "render", "index"}
     if body.type not in allowed:
         raise HTTPException(400, f"unknown job type {body.type}")
     exists = db.execute(text("SELECT 1 FROM briefings WHERE id = :id"), {"id": briefing_id}).first()
@@ -237,7 +230,6 @@ def start_job(briefing_id: str, body: JobIn, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/jobs/{job_id}")
 def get_job(job_id: str, db: Session = Depends(get_db)):
-    _require_dev_auth()
     row = db.execute(
         text("SELECT id, briefing_id, type, state, error FROM jobs WHERE id = :id"),
         {"id": job_id},
@@ -249,7 +241,6 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/briefings/{briefing_id}/script")
 def get_script(briefing_id: str, db: Session = Depends(get_db)):
-    _require_dev_auth()
     row = db.execute(
         text(
             """
@@ -295,7 +286,6 @@ def accept_script(briefing_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/assets/{asset_id}/content")
 def asset_content(asset_id: str, db: Session = Depends(get_db)):
-    _require_dev_auth()
     row = db.execute(
         text("SELECT minio_key FROM source_assets WHERE id = :id"),
         {"id": asset_id},
@@ -307,7 +297,6 @@ def asset_content(asset_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/briefings/{briefing_id}/artifacts")
 def list_artifacts(briefing_id: str, db: Session = Depends(get_db)):
-    _require_dev_auth()
     rows = db.execute(
         text(
             "SELECT id, kind, bytes, sha256, created_at FROM artifacts "
@@ -320,7 +309,6 @@ def list_artifacts(briefing_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/artifacts/{artifact_id}/content")
 def artifact_content(artifact_id: str, db: Session = Depends(get_db)):
-    _require_dev_auth()
     row = db.execute(
         text("SELECT minio_key FROM artifacts WHERE id = :id"),
         {"id": artifact_id},
@@ -332,7 +320,6 @@ def artifact_content(artifact_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/artifacts/{artifact_id}/file")
 def artifact_file(artifact_id: str, request: Request, db: Session = Depends(get_db)):
-    _require_dev_auth()
     """Stream an artifact from this origin so the film can seek and the deck can be framed."""
     row = db.execute(
         text("SELECT minio_key FROM artifacts WHERE id = :id"),
@@ -357,10 +344,31 @@ def artifact_file(artifact_id: str, request: Request, db: Session = Depends(get_
     return Response(content=body, status_code=status, headers=headers)
 
 
+@app.get("/api/v1/skills")
+def list_skills():
+    from grounded.catalog import CatalogError, load_catalog, load_crafts
+
+    try:
+        skills = load_catalog()
+        crafts = load_crafts()
+    except CatalogError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    return {"offline": True, "skills": skills, "crafts": crafts}
+
+
+@app.post("/api/v1/help/chat")
+def help_chat(body: ChatIn):
+    from grounded.chat import answer_grounded
+
+    question = (body.question or "").strip()
+    if not question:
+        raise HTTPException(400, "question is required")
+    return answer_grounded({"beats": []}, question[:2000])
+
+
 @app.post("/api/v1/briefings/{briefing_id}/chat")
 def briefing_chat(briefing_id: str, body: ChatIn, db: Session = Depends(get_db)):
-    _require_dev_auth()
-    from grounded.chat import answer
+    from grounded.chat import answer_grounded
 
     question = (body.question or "").strip()
     if not question:
@@ -378,7 +386,7 @@ def briefing_chat(briefing_id: str, body: ChatIn, db: Session = Depends(get_db))
     if not row:
         raise HTTPException(404, "no script yet")
     raw = row[0] if isinstance(row[0], dict) else json.loads(row[0])
-    return answer(raw, question[:2000])
+    return answer_grounded(raw, question[:2000], briefing_id=briefing_id, db=db)
 
 
 def _public_row(row) -> dict:

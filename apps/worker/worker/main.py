@@ -17,16 +17,9 @@ from .settings import settings
 
 ensure_engine()
 
-from grounded.network_policy import assert_private_runtime  # noqa: E402
 from grounded.render_deck import render_deck  # noqa: E402
 from grounded.render_recording import render_edit  # noqa: E402
 
-assert_private_runtime(
-    ("DATABASE_URL", settings.database_url),
-    ("REDIS_URL", settings.redis_url),
-    ("MINIO_ENDPOINT", settings.minio_endpoint),
-    ("MODEL_BASE_URL", settings.model_base_url),
-)
 engine = create_engine(settings.database_url, pool_pre_ping=True)
 Session = sessionmaker(bind=engine)
 QUEUE = "grounded.jobs"
@@ -62,11 +55,10 @@ def handle(payload: dict) -> None:
             run_qa(db, briefing_id)
         elif job_type == "render":
             render(db, briefing_id)
-        elif job_type in {"ingest", "parse"}:
-            ingest_sources(db, briefing_id)
-        elif job_type == "index":
-            # Embedding/indexing remains a separate future job. Parsing is real now.
+        elif job_type == "ingest":
             pass
+        elif job_type == "index":
+            index_knowledge(db, briefing_id)
         else:
             raise ValueError(f"unsupported job {job_type}")
         db.execute(
@@ -87,116 +79,11 @@ def handle(payload: dict) -> None:
         db.close()
 
 
-def ingest_sources(db, briefing_id: str) -> None:
-    """Normalize workbook/document assets into the source tables."""
-    from grounded.ingest import IngestError, parse_docx, parse_pdf
-    from grounded.ingest_workbook import extract_workbook_cells
-
-    assets = db.execute(
-        text(
-            """
-            SELECT id, kind, minio_key, filename
-            FROM source_assets
-            WHERE briefing_id = :id AND kind IN ('workbook', 'document')
-            ORDER BY created_at
-            """
-        ),
-        {"id": briefing_id},
-    ).all()
-
-    for asset_id, kind, key, filename in assets:
-        data = _bytes_for_asset(key, filename)
-        if kind == "workbook":
-            cells = extract_workbook_cells(data)
-            db.execute(text("DELETE FROM workbook_cells WHERE asset_id = :id"), {"id": asset_id})
-            for cell in cells:
-                db.execute(
-                    text(
-                        """
-                        INSERT INTO workbook_cells
-                          (id, asset_id, sheet, addr, value_num, value_text, fmt)
-                        VALUES
-                          (:id, :asset_id, :sheet, :addr, :value_num, :value_text, :fmt)
-                        """
-                    ),
-                    {
-                        "id": str(uuid.uuid4()),
-                        "asset_id": asset_id,
-                        **cell,
-                    },
-                )
-            continue
-
-        try:
-            if data.startswith(b"%PDF"):
-                doc = parse_pdf(data)
-            elif data[:2] == b"PK":
-                doc = parse_docx(data)
-            elif data.lstrip()[:1] in {b"{", b"["}:
-                parsed = json.loads(data)
-                if not isinstance(parsed, dict):
-                    raise RuntimeError("document JSON must be an object")
-                doc = parsed
-            else:
-                raise RuntimeError("document must be PDF, DOCX, or JSON")
-        except (IngestError, json.JSONDecodeError) as exc:
-            raise RuntimeError(str(exc)) from exc
-
-        db.execute(text("DELETE FROM document_blocks WHERE asset_id = :id"), {"id": asset_id})
-        seen: set[str] = set()
-        title = str(doc.get("title") or "").strip()
-        title_block = str(doc.get("title_block") or "p1")
-        if title:
-            db.execute(
-                text(
-                    """
-                    INSERT INTO document_blocks
-                      (id, asset_id, block_id, page, text)
-                    VALUES (:id, :asset_id, :block_id, :page, :text)
-                    """
-                ),
-                {
-                    "id": str(uuid.uuid4()),
-                    "asset_id": asset_id,
-                    "block_id": title_block,
-                    "page": 1,
-                    "text": title,
-                },
-            )
-            seen.add(title_block)
-        for block in doc.get("blocks") or []:
-            block_id = str(block.get("id") or "")
-            block_text = str(block.get("text") or "").strip()
-            if not block_id or not block_text or block_id in seen:
-                continue
-            db.execute(
-                text(
-                    """
-                    INSERT INTO document_blocks
-                      (id, asset_id, block_id, heading_path, page, text)
-                    VALUES
-                      (:id, :asset_id, :block_id, :heading_path, :page, :text)
-                    """
-                ),
-                {
-                    "id": str(uuid.uuid4()),
-                    "asset_id": asset_id,
-                    "block_id": block_id,
-                    "heading_path": block.get("heading_path"),
-                    "page": block.get("page"),
-                    "text": block_text,
-                },
-            )
-            seen.add(block_id)
-    db.commit()
-
-
-
 def transcribe(db, briefing_id: str) -> None:
     asset = db.execute(
         text(
             """
-            SELECT id, minio_key, mime FROM source_assets
+            SELECT id, minio_key, mime, filename FROM source_assets
             WHERE briefing_id = :id AND kind = 'recording'
             ORDER BY created_at DESC LIMIT 1
             """
@@ -205,27 +92,10 @@ def transcribe(db, briefing_id: str) -> None:
     ).first()
     if not asset:
         raise RuntimeError("no recording asset")
-    if settings.trans_provider == "local":
-        _transcribe_via_local(db, briefing_id, asset)
-        return
-    if settings.trans_provider != "stub":
-        raise RuntimeError("TRANS_PROVIDER must be 'local' or 'stub'; cloud transcription is prohibited")
-    # Stub provider: deterministic placeholder for development only.
-    db.execute(text("DELETE FROM transcript_segments WHERE asset_id = :aid"), {"aid": asset[0]})
-    db.execute(
-        text(
-            """
-            INSERT INTO transcript_segments (id, asset_id, t_start_ms, t_end_ms, text)
-            VALUES (:id, :aid, 0, 5000, :text)
-            """
-        ),
-        {
-            "id": str(uuid.uuid4()),
-            "aid": asset[0],
-            "text": "Placeholder transcript. Replace with faster-whisper on the GPU box.",
-        },
-    )
-    db.commit()
+    provider = (settings.trans_provider or "local").strip().lower()
+    if provider in {"transcribe", "aws", "polly", "stub"}:
+        raise RuntimeError("public transcription providers are disabled; set TRANS_PROVIDER=local")
+    _transcribe_local(db, briefing_id, asset)
 
 
 def compile_script(db, briefing_id: str) -> None:
@@ -282,9 +152,7 @@ def compile_script(db, briefing_id: str) -> None:
             "raw": json.dumps(script),
         },
     )
-    asset_ids = _citation_asset_ids(db, briefing_id)
     for beat in script["beats"]:
-        beat_id = str(uuid.uuid4())
         db.execute(
             text(
                 """
@@ -293,7 +161,7 @@ def compile_script(db, briefing_id: str) -> None:
                 """
             ),
             {
-                "id": beat_id,
+                "id": str(uuid.uuid4()),
                 "script_id": script_id,
                 "ord": beat["ord"],
                 "kind": beat["kind"],
@@ -301,32 +169,6 @@ def compile_script(db, briefing_id: str) -> None:
                 "visual": json.dumps({"layout": beat.get("layout")}),
             },
         )
-        for cite in beat.get("citations") or []:
-            asset_id = asset_ids.get(cite.get("kind"))
-            if not asset_id:
-                raise RuntimeError(f"no source asset for {cite.get('kind')} citation")
-            db.execute(
-                text(
-                    """
-                    INSERT INTO citations
-                      (id, beat_id, asset_id, kind, t_start_ms, t_end_ms, sheet, addr, block_id)
-                    VALUES
-                      (:id, :beat_id, :asset_id, CAST(:kind AS citation_kind),
-                       :t_start_ms, :t_end_ms, :sheet, :addr, :block_id)
-                    """
-                ),
-                {
-                    "id": str(uuid.uuid4()),
-                    "beat_id": beat_id,
-                    "asset_id": asset_id,
-                    "kind": cite.get("kind"),
-                    "t_start_ms": cite.get("t_start_ms"),
-                    "t_end_ms": cite.get("t_end_ms"),
-                    "sheet": cite.get("sheet"),
-                    "addr": cite.get("addr"),
-                    "block_id": cite.get("block_id"),
-                },
-            )
     db.execute(
         text("UPDATE briefings SET state = 'review' WHERE id = :id"),
         {"id": briefing_id},
@@ -372,24 +214,17 @@ def render(db, briefing_id: str) -> None:
         raise RuntimeError("; ".join(errors))
     out = Path(settings.artifact_dir) / briefing_id
     out.mkdir(parents=True, exist_ok=True)
+    video = None
     if script.get("renderer") == "recording":
         source_video = _fetch_source_video(db, briefing_id, out)
         rendered = render_edit(script, out, source_video=source_video)
         if rendered.get("video_error"):
             raise RuntimeError(rendered["video_error"])
+        video = rendered.get("video")
     else:
         render_deck(script, out / "deck.html")
-    if settings.narration_provider == "piper":
-        from grounded.narrate import narrate_script
-
-        narrate_script(
-            script,
-            out / "voiceover.mp3",
-            piper_bin=settings.piper_bin,
-            model_path=settings.piper_model_path,
-        )
-    elif settings.narration_provider:
-        raise RuntimeError("NARRATION_PROVIDER must be empty or 'piper'; cloud TTS is prohibited")
+    _write_sidecars(script, out)
+    _narrate_local(script, out, video)
     _persist_artifacts(db, briefing_id, out)
 
     db.execute(
@@ -446,37 +281,6 @@ def _persist_artifacts(db, briefing_id: str, out: Path) -> None:
                 "bytes": size,
             },
         )
-
-def _citation_asset_ids(db, briefing_id: str) -> dict[str, str]:
-    rows = db.execute(
-        text(
-            """
-            SELECT DISTINCT ON (kind) kind, id
-            FROM source_assets
-            WHERE briefing_id = :id AND kind IN ('recording', 'workbook', 'document')
-            ORDER BY kind, created_at DESC
-            """
-        ),
-        {"id": briefing_id},
-    ).all()
-    return {str(kind): str(asset_id) for kind, asset_id in rows}
-
-
-
-def _bytes_for_asset(key: str, filename: str | None) -> bytes:
-    import tempfile
-
-    suffix = Path(filename or "").suffix
-    handle = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-    handle.close()
-    dest = Path(handle.name)
-    try:
-        _download_asset(key, dest)
-        return dest.read_bytes()
-    finally:
-        dest.unlink(missing_ok=True)
-
-
 
 def _latest_bytes(db, briefing_id: str, kind: str) -> bytes | None:
     row = db.execute(
@@ -550,27 +354,22 @@ def _fetch_source_video(db, briefing_id: str, out: Path):
     )
 
 
-def _transcribe_via_local(db, briefing_id: str, asset) -> None:
-    """Transcribe the stored recording entirely on the private worker."""
-    from .transcribe_local import transcribe_file
+def _transcribe_local(db, briefing_id: str, asset) -> None:
+    from .transcribe_local import LocalTranscribeError, transcribe_file
 
     asset_id, minio_key = asset[0], asset[1]
-    import tempfile
-
-    handle = tempfile.NamedTemporaryFile(delete=False, suffix=".media")
-    handle.close()
-    media_path = Path(handle.name)
+    suffix = Path(asset[3] if len(asset) > 3 else "").suffix or ".mp4"
+    dest = Path(settings.artifact_dir) / briefing_id / f"upload{suffix}"
     try:
-        _download_asset(minio_key, media_path)
-        segments = transcribe_file(
-            media_path,
-            settings.whisper_model_path,
-            device=settings.whisper_device,
-            language=settings.trans_language,
-        )
+        _download_asset(minio_key, dest)
+        try:
+            segments = transcribe_file(dest, settings.whisper_model, settings.whisper_cache)
+        except LocalTranscribeError as exc:
+            raise RuntimeError(str(exc)) from exc
     finally:
-        media_path.unlink(missing_ok=True)
-
+        dest.unlink(missing_ok=True)
+    if not segments:
+        raise RuntimeError("local transcription returned no speech")
     db.execute(text("DELETE FROM transcript_segments WHERE asset_id = :aid"), {"aid": asset_id})
     for segment in segments:
         db.execute(
@@ -586,6 +385,80 @@ def _transcribe_via_local(db, briefing_id: str, asset) -> None:
                 "start_ms": segment["t_start_ms"],
                 "end_ms": segment["t_end_ms"],
                 "text": segment["text"],
+            },
+        )
+    db.commit()
+
+
+def _narrate_local(script: dict, out: Path, video: Path | None) -> None:
+    provider = (settings.narration_provider or "local").strip().lower()
+    if provider in {"", "off", "none"}:
+        return
+    if provider in {"polly", "elevenlabs", "aws"}:
+        raise RuntimeError("public narration providers are disabled; set NARRATION_PROVIDER=local")
+    from grounded.local_voice import LocalVoiceError, max_volume_db, mix_bed, narrate_local
+    from grounded.quality import clipping_warning
+
+    if settings.piper_bin:
+        import os
+
+        os.environ["PIPER_BIN"] = settings.piper_bin
+    if settings.piper_model:
+        import os
+
+        os.environ["PIPER_MODEL"] = settings.piper_model
+    try:
+        voice = narrate_local(script, out / "voiceover.mp3")
+    except LocalVoiceError as exc:
+        raise RuntimeError(str(exc)) from exc
+    if video is not None and Path(video).is_file():
+        mixed = out / "_mixed.mp4"
+        try:
+            mix_bed(Path(video), voice, mixed)
+            mixed.replace(video)
+        except LocalVoiceError as exc:
+            raise RuntimeError(str(exc)) from exc
+        finally:
+            mixed.unlink(missing_ok=True)
+    warning = clipping_warning(max_volume_db(out / "voiceover.mp3"))
+    if warning:
+        raise RuntimeError(warning)
+
+
+def _write_sidecars(script: dict, out: Path) -> None:
+    from grounded.formats import placement_plan
+    from grounded.quality import gate_script
+
+    report = gate_script(script)
+    (out / "quality.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    (out / "placement.json").write_text(json.dumps(placement_plan(), indent=2), encoding="utf-8")
+    if report["status"] == "fail":
+        raise RuntimeError("quality gate: " + "; ".join(report["errors"]))
+
+
+def index_knowledge(db, briefing_id: str) -> None:
+    """Store local hash embeddings for docs and skills. No hosted embedder."""
+    from grounded.knowledge import iter_chunks, vector_literal
+
+    db.execute(text("DELETE FROM embedding_chunks WHERE briefing_id = :id"), {"id": briefing_id})
+    chunks = iter_chunks()[:80]
+    if not chunks:
+        db.commit()
+        return
+    for chunk in chunks:
+        db.execute(
+            text(
+                """
+                INSERT INTO embedding_chunks (id, briefing_id, kind, text, span, embedding)
+                VALUES (:id, :briefing_id, 'doc', :text, CAST(:span AS jsonb), CAST(:embedding AS vector))
+                """
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "briefing_id": briefing_id,
+                "text": chunk["text"],
+                "span": json.dumps({"path": chunk["path"]}),
+                "embedding": vector_literal(chunk["text"]),
             },
         )
     db.commit()

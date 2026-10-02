@@ -1,11 +1,15 @@
-from grounded.network_policy import assert_internal_url
 from .settings import settings
 
 
 def _client(client=None):
+    from grounded.egress import EgressError, assert_object_store
+
+    try:
+        assert_object_store(settings.minio_endpoint)
+    except EgressError as exc:
+        raise RuntimeError(str(exc)) from exc
     if client is not None:
         return client
-    assert_internal_url(settings.minio_endpoint, "MINIO_ENDPOINT")
     try:
         import boto3
         from botocore.client import Config
@@ -49,17 +53,6 @@ def put_bytes(key: str, data: bytes, content_type: str, client=None) -> None:
         Key=key,
         Body=data,
         ContentType=content_type,
-    )
-
-
-def put_fileobj(key: str, fileobj, content_type: str, client=None) -> None:
-    """Upload a seekable file object without materializing it in application memory."""
-    ensure_bucket(client)
-    _client(client).upload_fileobj(
-        fileobj,
-        settings.minio_bucket,
-        key,
-        ExtraArgs={"ContentType": content_type},
     )
 
 

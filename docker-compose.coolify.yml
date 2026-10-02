@@ -48,7 +48,8 @@ services:
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-grounded}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in Coolify}
-      GROUND_ALLOW_PUBLIC_EGRESS: "false"
+      EGRESS_MODE: ${EGRESS_MODE:-offline}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-}
     expose:
       - "8000"
     depends_on:
@@ -71,14 +72,13 @@ services:
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-grounded}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in Coolify}
-      TRANS_PROVIDER: ${TRANS_PROVIDER:-stub}
-      WHISPER_MODEL_PATH: ${WHISPER_MODEL_PATH:-}
-      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
-      TRANS_LANGUAGE: ${TRANS_LANGUAGE:-en}
-      NARRATION_PROVIDER: ${NARRATION_PROVIDER:-}
-      PIPER_BIN: ${PIPER_BIN:-piper}
-      PIPER_MODEL_PATH: ${PIPER_MODEL_PATH:-}
-      GROUND_ALLOW_PUBLIC_EGRESS: "false"
+      EGRESS_MODE: ${EGRESS_MODE:-offline}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-}
+      TRANS_PROVIDER: ${TRANS_PROVIDER:-local}
+      TRANS_LANGUAGE: ${TRANS_LANGUAGE:-en-US}
+      NARRATION_PROVIDER: ${NARRATION_PROVIDER:-local}
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
     depends_on:
       postgres:
         condition: service_healthy
