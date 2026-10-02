@@ -10,5 +10,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-de
 COPY apps/api/app ./app
 COPY apps/worker/worker ./worker
 COPY apps/engine/grounded ./grounded
+COPY skills ./skills
 COPY schema/schema.sql ./schema.sql
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
