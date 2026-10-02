@@ -7,7 +7,7 @@ Application skeleton is in `apps/api` and `apps/worker`.
 1. Create a briefing
 2. Upload a recording into MinIO
 3. Enqueue `transcribe` (local faster-whisper with preloaded weights; cloud ASR is not available)
-4. Enqueue `compile` — a transcript becomes a walkthrough, a workbook JSON pack becomes the weekly deck, and a `.docx` becomes a leadership or launch deck. The director gates run before the script is saved.
+4. Enqueue `compile` — sources are normalized first (cells, blocks, segments). A transcript becomes a walkthrough, an `.xlsx`/`.csv` workbook becomes a WBR/finance/half-year/executive review, and Word/PDF/PowerPoint/Markdown become a leadership or launch deck. Citations are verified against the normalized rows before the script is saved.
 5. Citation QA fails closed if a beat has no span
 6. Fetch and accept the script
 7. Enqueue `render` — cuts the real recording (or renders the deck), writes cell/calculation audits, and adds local Piper narration when `GROUNDED_TTS_PROVIDER=local`
