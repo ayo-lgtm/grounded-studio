@@ -53,6 +53,7 @@ def _parse_xlsx(data: bytes) -> dict[str, Any]:
     period_sheet = ""
     period_addr = ""
     warnings: list[str] = []
+    source_ranges: list[dict[str, Any]] = []
 
     for ws in formulas.worksheets:
         value_ws = values[ws.title]
@@ -71,6 +72,7 @@ def _parse_xlsx(data: bytes) -> dict[str, Any]:
             title_sheet = ws.title
             title_addr = ws.cell(1, 1).coordinate if candidate not in (None, "") else ws.cell(header_row, label_col).coordinate
 
+        selected_rows: list[int] = []
         for row in range(header_row + 1, ws.max_row + 1):
             label = ws.cell(row, label_col).value
             if label is None or not str(label).strip():
@@ -108,6 +110,7 @@ def _parse_xlsx(data: bytes) -> dict[str, Any]:
                         }
                     )
             kpis.append(item)
+            selected_rows.append(row)
 
             if prior_col is not None:
                 prior_formula = ws.cell(row, prior_col)
@@ -128,6 +131,19 @@ def _parse_xlsx(data: bytes) -> dict[str, Any]:
                         }
                     )
 
+        if selected_rows:
+            cols = [label_col, actual_col] + [col for col in (prior_col, target_col) if col is not None]
+            source_ranges.append(
+                _xlsx_source_range(
+                    ws,
+                    value_ws,
+                    header_row,
+                    max(selected_rows),
+                    min(cols),
+                    max(cols),
+                )
+            )
+
     if not kpis:
         raise CompileError(
             [
@@ -143,6 +159,7 @@ def _parse_xlsx(data: bytes) -> dict[str, Any]:
         "risks": [],
         "asks": [],
         "data_quality": warnings,
+        "source_ranges": source_ranges,
     }
 
 
@@ -161,6 +178,7 @@ def _parse_csv(data: bytes) -> dict[str, Any]:
     headers = rows[header_row]
     kpis: list[dict[str, Any]] = []
     movers: list[dict[str, Any]] = []
+    selected_rows: list[int] = []
     for rindex, row in enumerate(rows[header_row + 1 :], start=header_row + 2):
         if label_col >= len(row) or actual_col >= len(row):
             continue
@@ -191,6 +209,7 @@ def _parse_csv(data: bytes) -> dict[str, Any]:
                     }
                 )
         kpis.append(item)
+        selected_rows.append(rindex)
         if prior_col is not None and prior_col < len(row):
             prior = _number(row[prior_col])
             if prior is not None:
@@ -211,6 +230,10 @@ def _parse_csv(data: bytes) -> dict[str, Any]:
     if not kpis:
         raise CompileError(["CSV review table contains no numeric actual values"])
     title_text = rows[0][0].strip() if header_row > 0 and rows[0] and rows[0][0].strip() else "Business Review"
+    cols = [label_col, actual_col] + [col for col in (prior_col, target_col) if col is not None]
+    source_ranges = [
+        _csv_source_range(rows, header_row + 1, max(selected_rows), min(cols) + 1, max(cols) + 1)
+    ] if selected_rows else []
     title_addr = "A1" if header_row > 0 else _a1(header_row + 1, label_col + 1)
     return {
         "title": {"sheet": "CSV", "addr": title_addr, "text": title_text},
@@ -220,6 +243,61 @@ def _parse_csv(data: bytes) -> dict[str, Any]:
         "risks": [],
         "asks": [],
         "data_quality": [],
+        "source_ranges": source_ranges,
+    }
+
+
+
+def _xlsx_source_range(ws, value_ws, start_row: int, end_row: int, start_col: int, end_col: int) -> dict[str, Any]:
+    rows: list[list[dict[str, Any]]] = []
+    for rindex in range(start_row, end_row + 1):
+        row: list[dict[str, Any]] = []
+        for cindex in range(start_col, end_col + 1):
+            authored = ws.cell(rindex, cindex)
+            resolved = value_ws.cell(rindex, cindex).value
+            value = resolved if resolved is not None else authored.value
+            num = _number(resolved)
+            unit = _unit(authored.number_format)
+            display = _display(num, authored.number_format, unit) if num is not None else str(value or "")
+            row.append(
+                {
+                    "addr": authored.coordinate,
+                    "display": display,
+                    "value": num,
+                    "unit": unit,
+                }
+            )
+        rows.append(row)
+    return {
+        "sheet": ws.title,
+        "range": f"{_a1(start_row, start_col)}:{_a1(end_row, end_col)}",
+        "rows": rows,
+    }
+
+
+def _csv_source_range(rows: list[list[str]], start_row: int, end_row: int, start_col: int, end_col: int) -> dict[str, Any]:
+    visual_rows: list[list[dict[str, Any]]] = []
+    for rindex in range(start_row, end_row + 1):
+        source = rows[rindex - 1] if rindex - 1 < len(rows) else []
+        visual: list[dict[str, Any]] = []
+        for cindex in range(start_col, end_col + 1):
+            raw = source[cindex - 1] if cindex - 1 < len(source) else ""
+            num = _number(raw)
+            unit = "pct" if "%" in raw else "number"
+            value = num / 100 if num is not None and unit == "pct" else num
+            visual.append(
+                {
+                    "addr": _a1(rindex, cindex),
+                    "display": raw,
+                    "value": value,
+                    "unit": unit,
+                }
+            )
+        visual_rows.append(visual)
+    return {
+        "sheet": "CSV",
+        "range": f"{_a1(start_row, start_col)}:{_a1(end_row, end_col)}",
+        "rows": visual_rows,
     }
 
 
