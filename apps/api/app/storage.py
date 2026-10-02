@@ -2,6 +2,12 @@ from .settings import settings
 
 
 def _client(client=None):
+    from grounded.egress import EgressError, assert_object_store
+
+    try:
+        assert_object_store(settings.minio_endpoint)
+    except EgressError as exc:
+        raise RuntimeError(str(exc)) from exc
     if client is not None:
         return client
     try:

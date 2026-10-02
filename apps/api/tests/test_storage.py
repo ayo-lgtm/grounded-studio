@@ -65,6 +65,18 @@ class StorageTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             ensure_bucket(client=FakeS3(error=RuntimeError("boom")))
 
+    def test_public_minio_endpoint_is_refused(self):
+        from app.storage import settings as _s
+
+        previous = _s.minio_endpoint
+        _s.minio_endpoint = "https://t3.storageapi.dev"
+        try:
+            with self.assertRaises(RuntimeError) as caught:
+                put_bytes("k/v.mp4", b"data", "video/mp4", client=FakeS3())
+            self.assertIn("public", str(caught.exception))
+        finally:
+            _s.minio_endpoint = previous
+
     def test_put_and_signed_url(self):
         s3 = FakeS3(error=FakeDenied("Forbidden"))
         put_bytes("k/v.mp4", b"data", "video/mp4", client=s3)

@@ -491,12 +491,19 @@ body.dropping #stage { outline: 1px solid var(--paper); outline-offset: -16px; }
 <script>
 const CHOICES = [
   ["product-walkthrough", "Walkthrough"],
+  ["continuous-take-demo", "Continuous"],
   ["weekly-ops-review", "Weekly"],
+  ["wbr-executive", "WBR"],
+  ["still-sequence-slideshow", "Slideshow"],
   ["leadership-brief", "Brief"],
   ["launch-announcement", "Launch"],
 ];
 const SKILL_WORD = {
   "product-walkthrough": "Walkthrough",
+  "continuous-take-demo": "Continuous",
+  "still-sequence-slideshow": "Slideshow",
+  "wbr-executive": "WBR",
+  "wbr-kpi-spine": "WBR",
   "sop-training": "Procedure",
   "feature-delta": "What changed",
   "weekly-ops-review": "Weekly",
@@ -621,7 +628,8 @@ function renderTools() {
   }
   if (script && !hasFilm && !hasDeck) parts.push(`<button type="button" id="project">Project</button>`);
   if (script && !script.accepted) parts.push(`<button type="button" id="accept">Accept</button>`);
-  else if (script && script.accepted) parts.push(`<span class="quiet">Accepted</span>`);
+  else   if (script && script.accepted) parts.push(`<span class="quiet">Accepted</span>`);
+  if (room.current) parts.push(`<button type="button" id="link">Link</button>`);
   parts.push(`<button type="button" id="new">New</button>`);
   tools.innerHTML = parts.join("");
 }
@@ -635,9 +643,19 @@ function onTool(event) {
   const button = event.target.closest("button");
   if (!button) return;
   if (button.id === "new") goNew();
+  else if (button.id === "link") copyLink();
   else if (button.id === "accept") accept().catch((err) => showFailure(currentTitle(), err.message));
   else if (button.id === "project") project();
   else if (button.dataset.mode) setMode(button.dataset.mode);
+}
+
+function copyLink() {
+  const url = location.href;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => say("Link copied."));
+    return;
+  }
+  say("Link is in the address bar.");
 }
 
 function goNew() {
@@ -1150,8 +1168,11 @@ function planFor(file) {
     const skill = room.skill === "launch-announcement" ? "launch-announcement" : "leadership-brief";
     return { skill, kind: "document" };
   }
-  if (name.endsWith(".json")) return { skill: "weekly-ops-review", kind: "workbook" };
-  const recording = new Set(["product-walkthrough", "sop-training", "feature-delta"]);
+  if (name.endsWith(".json")) {
+    const workbook = new Set(["weekly-ops-review", "wbr-executive", "wbr-kpi-spine", "kpi-spotlight-deck"]);
+    return { skill: workbook.has(room.skill) ? room.skill : "weekly-ops-review", kind: "workbook" };
+  }
+  const recording = new Set(["product-walkthrough", "sop-training", "feature-delta", "continuous-take-demo", "still-sequence-slideshow", "chaptered-demo-cut"]);
   return { skill: recording.has(room.skill) ? room.skill : "product-walkthrough", kind: "recording" };
 }
 
@@ -1232,6 +1253,8 @@ function currentBeats() {
 
 function chapterItems(edl) {
   const items = (edl && edl.items) || [];
+  const carries = items.filter((item) => item.type === "carry");
+  if (carries.length) return carries;
   const chapters = items.filter((item) => item.type === "chapter");
   return chapters.length ? chapters : items.filter((item) => item.type === "cut");
 }
@@ -1277,8 +1300,10 @@ function unwrap(row) {
 function skillWord(skill) { return SKILL_WORD[skill] || "Briefing"; }
 
 function skillHint(skill) {
-  if (skill === "weekly-ops-review") return "A workbook as JSON.";
+  if (skill === "weekly-ops-review" || skill === "wbr-executive" || skill === "wbr-kpi-spine") return "A workbook as JSON. Empty KPIs fail.";
   if (skill === "leadership-brief" || skill === "launch-announcement") return "A Word file.";
+  if (skill === "continuous-take-demo") return "A screen recording. Each beat keeps a frame from the last.";
+  if (skill === "still-sequence-slideshow") return "A screen recording, advanced as cited stills.";
   return "A screen recording.";
 }
 

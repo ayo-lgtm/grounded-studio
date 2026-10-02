@@ -53,14 +53,7 @@ def voice_for(language: str) -> str:
 def _client_or_create(client: PollyClient | None, region: str) -> PollyClient:
     if client is not None:
         return client
-    try:
-        import boto3  # lazy: engine stays dependency-light for tests
-    except ImportError as exc:
-        raise PollyError("boto3 is not installed") from exc
-    try:
-        return boto3.client("polly", region_name=region)  # type: ignore[return-value]
-    except Exception as exc:
-        raise PollyError(f"cannot create polly client: {exc}") from exc
+    raise PollyError("public Polly is disabled; use local Piper or Kokoro")
 
 
 def synthesize(text: str, voice_id: str, region: str, client: PollyClient | None = None) -> bytes:

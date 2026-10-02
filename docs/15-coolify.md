@@ -13,10 +13,8 @@ routes the api domain through its proxy, and redeploys on every push.
    the box does not have to be EC2.
 2. A domain (or subdomain) pointed at the box for the api, e.g.
    `studio.example.com`.
-3. The S3 staging bucket + Bedrock model access from [14](14-aws-claude.md)
-   if you want Transcribe/Polly/Claude. On a non-EC2 box there is no
-   instance profile, so create an IAM user with that same policy and keep
-   its keys for step 5.
+3. No public model keys. Chat, transcription, and narration stay on the box.
+   See [17](17-offline-egress.md). Doc [14](14-aws-claude.md) is a closed pilot record.
 
 ## Install Coolify (one time, on the box)
 
@@ -42,18 +40,16 @@ Required (deploy is blocked while these are empty):
 | `POSTGRES_PASSWORD` | long random string |
 | `MINIO_ROOT_PASSWORD` | long random string (app keys reuse it automatically) |
 
-AWS + providers (same meaning as [14](14-aws-claude.md)):
+Offline profile (defaults in the compose file):
 
 | Variable | Value |
 |---|---|
-| `AWS_REGION` | e.g. `us-east-1` |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | IAM user keys; leave empty only on EC2 with an instance profile |
-| `CLAUDE_MODEL_ID` | default is fine |
-| `TRANS_PROVIDER` | `stub` first; `transcribe` once the bucket exists |
-| `TRANS_S3_BUCKET` | staging bucket, e.g. `grounded-transcribe-staging` |
-| `TRANS_LANGUAGE` | `en-US` |
-| `NARRATION_PROVIDER` | empty first; `polly` to enable voiceover |
-| `NARRATION_VOICE` | empty = per-language default |
+| `EGRESS_MODE` | `offline` |
+| `TRANS_PROVIDER` | `local` (faster-whisper). `stub`, `transcribe`, and `aws` fail the job |
+| `NARRATION_PROVIDER` | `local` (Piper or Kokoro). `polly` and `elevenlabs` fail the job |
+| `MODEL_BASE_URL` | empty, or a private host only |
+
+Do not set `CLAUDE_MODEL_ID` or AWS keys for chat, TTS, or ASR. MinIO is the `minio` service on the compose network (`http://minio:9000`).
 
 Everything else (`POSTGRES_USER`, `MINIO_BUCKET`, …) keeps its default
 unless you change it in the UI.
@@ -70,9 +66,9 @@ unless you change it in the UI.
 
 1. Press **Deploy** and watch the log: images build, postgres runs
    `schema.sql`, api + worker start.
-2. `curl https://studio.example.com/health` → `{"ok": true, …}`.
-3. Run the end-to-end check from [14](14-aws-claude.md) (briefing → asset →
-   transcribe → compile → script → render → chat), swapping the host.
+2. `curl https://studio.example.com/health` → `egress` is `offline`, `chat` is `retrieval`, `object_store` is `private`.
+3. Run the end-to-end check from [16](16-railway.md) (briefing → asset →
+   local transcribe → compile → script → render → chat), swapping the host.
 4. Every push to `main` redeploys automatically (disable in the resource
    settings if you want manual releases).
 

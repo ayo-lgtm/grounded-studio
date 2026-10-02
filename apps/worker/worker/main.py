@@ -55,9 +55,10 @@ def handle(payload: dict) -> None:
             run_qa(db, briefing_id)
         elif job_type == "render":
             render(db, briefing_id)
-        elif job_type in {"ingest", "index"}:
-            # Phase 1 no-op: assets are stored inline by the API; embeddings ship later.
+        elif job_type == "ingest":
             pass
+        elif job_type == "index":
+            index_knowledge(db, briefing_id)
         else:
             raise ValueError(f"unsupported job {job_type}")
         db.execute(
@@ -82,7 +83,7 @@ def transcribe(db, briefing_id: str) -> None:
     asset = db.execute(
         text(
             """
-            SELECT id, minio_key, mime FROM source_assets
+            SELECT id, minio_key, mime, filename FROM source_assets
             WHERE briefing_id = :id AND kind = 'recording'
             ORDER BY created_at DESC LIMIT 1
             """
@@ -91,25 +92,10 @@ def transcribe(db, briefing_id: str) -> None:
     ).first()
     if not asset:
         raise RuntimeError("no recording asset")
-    if settings.trans_provider == "transcribe":
-        _transcribe_via_aws(db, briefing_id, asset)
-        return
-    # Stub provider: deterministic placeholder until GPU transcription lands.
-    db.execute(text("DELETE FROM transcript_segments WHERE asset_id = :aid"), {"aid": asset[0]})
-    db.execute(
-        text(
-            """
-            INSERT INTO transcript_segments (id, asset_id, t_start_ms, t_end_ms, text)
-            VALUES (:id, :aid, 0, 5000, :text)
-            """
-        ),
-        {
-            "id": str(uuid.uuid4()),
-            "aid": asset[0],
-            "text": "Placeholder transcript. Replace with faster-whisper on the GPU box.",
-        },
-    )
-    db.commit()
+    provider = (settings.trans_provider or "local").strip().lower()
+    if provider in {"transcribe", "aws", "polly", "stub"}:
+        raise RuntimeError("public transcription providers are disabled; set TRANS_PROVIDER=local")
+    _transcribe_local(db, briefing_id, asset)
 
 
 def compile_script(db, briefing_id: str) -> None:
@@ -228,17 +214,17 @@ def render(db, briefing_id: str) -> None:
         raise RuntimeError("; ".join(errors))
     out = Path(settings.artifact_dir) / briefing_id
     out.mkdir(parents=True, exist_ok=True)
+    video = None
     if script.get("renderer") == "recording":
         source_video = _fetch_source_video(db, briefing_id, out)
         rendered = render_edit(script, out, source_video=source_video)
         if rendered.get("video_error"):
             raise RuntimeError(rendered["video_error"])
+        video = rendered.get("video")
     else:
         render_deck(script, out / "deck.html")
-    if settings.narration_provider == "polly":
-        from grounded.narrate import narrate_script
-
-        narrate_script(script, out / "voiceover.mp3", region=settings.aws_region)
+    _write_sidecars(script, out)
+    _narrate_local(script, out, video)
     _persist_artifacts(db, briefing_id, out)
 
     db.execute(
@@ -368,35 +354,22 @@ def _fetch_source_video(db, briefing_id: str, out: Path):
     )
 
 
-def _transcribe_via_aws(db, briefing_id: str, asset) -> None:
-    from .transcribe_aws import parse_transcribe_json, stage_from_store, transcribe_media
+def _transcribe_local(db, briefing_id: str, asset) -> None:
+    from .transcribe_local import LocalTranscribeError, transcribe_file
 
-    if not settings.trans_s3_bucket:
-        raise RuntimeError("TRANS_S3_BUCKET is not set")
     asset_id, minio_key = asset[0], asset[1]
-    dest_key = f"transcribe/{briefing_id}/{asset_id}"
-    media_uri = stage_from_store(
-        settings.minio_endpoint,
-        settings.minio_bucket,
-        minio_key,
-        settings.minio_access_key,
-        settings.minio_secret_key,
-        settings.trans_s3_bucket,
-        dest_key,
-        settings.aws_region,
-        settings.minio_region,
-    )
-    job_name = f"grounded-{str(asset_id).replace('-', '')[:24]}-{int(time.time())}"
-    payload = transcribe_media(
-        media_uri,
-        job_name,
-        settings.trans_language,
-        settings.aws_region,
-        settings.trans_timeout_s,
-    )
-    segments = parse_transcribe_json(payload)
+    suffix = Path(asset[3] if len(asset) > 3 else "").suffix or ".mp4"
+    dest = Path(settings.artifact_dir) / briefing_id / f"upload{suffix}"
+    try:
+        _download_asset(minio_key, dest)
+        try:
+            segments = transcribe_file(dest, settings.whisper_model, settings.whisper_cache)
+        except LocalTranscribeError as exc:
+            raise RuntimeError(str(exc)) from exc
+    finally:
+        dest.unlink(missing_ok=True)
     if not segments:
-        raise RuntimeError("transcribe returned no segments")
+        raise RuntimeError("local transcription returned no speech")
     db.execute(text("DELETE FROM transcript_segments WHERE asset_id = :aid"), {"aid": asset_id})
     for segment in segments:
         db.execute(
@@ -412,6 +385,80 @@ def _transcribe_via_aws(db, briefing_id: str, asset) -> None:
                 "start_ms": segment["t_start_ms"],
                 "end_ms": segment["t_end_ms"],
                 "text": segment["text"],
+            },
+        )
+    db.commit()
+
+
+def _narrate_local(script: dict, out: Path, video: Path | None) -> None:
+    provider = (settings.narration_provider or "local").strip().lower()
+    if provider in {"", "off", "none"}:
+        return
+    if provider in {"polly", "elevenlabs", "aws"}:
+        raise RuntimeError("public narration providers are disabled; set NARRATION_PROVIDER=local")
+    from grounded.local_voice import LocalVoiceError, max_volume_db, mix_bed, narrate_local
+    from grounded.quality import clipping_warning
+
+    if settings.piper_bin:
+        import os
+
+        os.environ["PIPER_BIN"] = settings.piper_bin
+    if settings.piper_model:
+        import os
+
+        os.environ["PIPER_MODEL"] = settings.piper_model
+    try:
+        voice = narrate_local(script, out / "voiceover.mp3")
+    except LocalVoiceError as exc:
+        raise RuntimeError(str(exc)) from exc
+    if video is not None and Path(video).is_file():
+        mixed = out / "_mixed.mp4"
+        try:
+            mix_bed(Path(video), voice, mixed)
+            mixed.replace(video)
+        except LocalVoiceError as exc:
+            raise RuntimeError(str(exc)) from exc
+        finally:
+            mixed.unlink(missing_ok=True)
+    warning = clipping_warning(max_volume_db(out / "voiceover.mp3"))
+    if warning:
+        raise RuntimeError(warning)
+
+
+def _write_sidecars(script: dict, out: Path) -> None:
+    from grounded.formats import placement_plan
+    from grounded.quality import gate_script
+
+    report = gate_script(script)
+    (out / "quality.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    (out / "placement.json").write_text(json.dumps(placement_plan(), indent=2), encoding="utf-8")
+    if report["status"] == "fail":
+        raise RuntimeError("quality gate: " + "; ".join(report["errors"]))
+
+
+def index_knowledge(db, briefing_id: str) -> None:
+    """Store local hash embeddings for docs and skills. No hosted embedder."""
+    from grounded.knowledge import iter_chunks, vector_literal
+
+    db.execute(text("DELETE FROM embedding_chunks WHERE briefing_id = :id"), {"id": briefing_id})
+    chunks = iter_chunks()[:80]
+    if not chunks:
+        db.commit()
+        return
+    for chunk in chunks:
+        db.execute(
+            text(
+                """
+                INSERT INTO embedding_chunks (id, briefing_id, kind, text, span, embedding)
+                VALUES (:id, :briefing_id, 'doc', :text, CAST(:span AS jsonb), CAST(:embedding AS vector))
+                """
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "briefing_id": briefing_id,
+                "text": chunk["text"],
+                "span": json.dumps({"path": chunk["path"]}),
+                "embedding": vector_literal(chunk["text"]),
             },
         )
     db.commit()

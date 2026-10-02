@@ -5,13 +5,21 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .compile_deck import CompileError, cell_index, compile_document, compile_workbook
-from .compile_recording import compile_recording
+from .compile_deck import CompileError, cell_index
 from .director import direct
 from .ingest import IngestError, parse_docx
 
 _RECORDING_SKILLS = frozenset({"product-walkthrough", "sop-training", "feature-delta"})
 _DOCUMENT_SKILLS = frozenset({"leadership-brief", "launch-announcement"})
+DOCUMENT_SKILLS = _DOCUMENT_SKILLS
+
+
+def load_json(data: bytes, label: str) -> dict[str, Any]:
+    return _json_object(data, label)
+
+
+def load_document(data: bytes) -> dict[str, Any]:
+    return _load_document(data)
 
 
 def compile_uploaded(
@@ -30,28 +38,17 @@ def compile_uploaded(
     walkthrough skill is compiled as a leadership brief instead of waiting
     for a transcript that will never arrive.
     """
-    spoken = [dict(segment) for segment in (segments or []) if (segment.get("text") or "").strip()]
-    if skill_id in _RECORDING_SKILLS and spoken:
-        script = compile_recording(spoken, skill_id=skill_id, title=title or "Walkthrough")
-        _approve(script)
-        return script
-    if skill_id == "weekly-ops-review" or (
-        workbook and not document and skill_id not in _DOCUMENT_SKILLS and not spoken
-    ):
-        if not workbook:
-            raise CompileError(["weekly-ops-review needs a workbook JSON upload"])
-        pack = _json_object(workbook, "workbook")
-        script = compile_workbook(pack, "weekly-ops-review")
-        _approve(script, pack, cell_index(pack))
-        return script
-    if document and (skill_id in _DOCUMENT_SKILLS or not spoken):
-        doc_skill = skill_id if skill_id in _DOCUMENT_SKILLS else "leadership-brief"
-        script = compile_document(_load_document(document), doc_skill)
-        _approve(script)
-        return script
-    if skill_id in _RECORDING_SKILLS:
-        raise CompileError(["transcribe first"])
-    raise CompileError(["upload a workbook JSON or a .docx before compile"])
+    from . import compile_sources as sources
+    from .dispatch import compile_for_skill
+
+    return compile_for_skill(
+        skill_id=skill_id,
+        title=title,
+        segments=segments,
+        document=document,
+        workbook=workbook,
+        sources=sources,
+    )
 
 
 def _approve(

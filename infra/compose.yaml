@@ -1,6 +1,6 @@
-# Pilot deploy on an internal AWS box (single EC2).
-# AI runs on Bedrock Claude in-region; transcription on AWS Transcribe.
-# The instance profile supplies credentials — never put AWS keys in .env.
+# Pilot deploy on an internal box (single host).
+# Default is offline: in-network MinIO, local faster-whisper, local Piper.
+# Do not point chat, TTS, or ASR at Bedrock, Transcribe, or Polly.
 
 services:
   postgres:
@@ -51,8 +51,8 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change-me-too}
       MINIO_BUCKET: ${MINIO_BUCKET:-grounded}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-      CLAUDE_MODEL_ID: ${CLAUDE_MODEL_ID:-anthropic.claude-3-5-sonnet-20241022-v2:0}
+      EGRESS_MODE: ${EGRESS_MODE:-offline}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -72,18 +72,18 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-grounded}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-grounded}
       REDIS_URL: redis://redis:6379/0
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-      CLAUDE_MODEL_ID: ${CLAUDE_MODEL_ID:-anthropic.claude-3-5-sonnet-20241022-v2:0}
+      EGRESS_MODE: ${EGRESS_MODE:-offline}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-}
       MINIO_ENDPOINT: http://minio:9000
       MINIO_BUCKET: ${MINIO_BUCKET:-grounded}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-grounded}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change-me-too}
-      TRANS_PROVIDER: ${TRANS_PROVIDER:-stub}
-      TRANS_S3_BUCKET: ${TRANS_S3_BUCKET:-}
+      TRANS_PROVIDER: ${TRANS_PROVIDER:-local}
       TRANS_LANGUAGE: ${TRANS_LANGUAGE:-en-US}
-      NARRATION_PROVIDER: ${NARRATION_PROVIDER:-}
-      NARRATION_VOICE: ${NARRATION_VOICE:-}
+      NARRATION_PROVIDER: ${NARRATION_PROVIDER:-local}
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
     depends_on:
       postgres:
         condition: service_healthy

@@ -29,7 +29,36 @@ def _require_dev_auth() -> None:
     if not settings.dev_bypass_auth:
         raise HTTPException(501, "SSO auth is not wired yet")
 
-app = FastAPI(title="Grounded Studio", version="0.1.0")
+app = FastAPI(
+    title="Grounded Studio",
+    version="0.1.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
+
+_LOCAL_DOCS = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Grounded API</title>
+<style>
+body { margin: 2rem; font-family: Georgia, serif; background: #f3f0e8; color: #1a1814; }
+code { font-family: ui-monospace, monospace; }
+</style></head>
+<body>
+<h1>Grounded API</h1>
+<p>Offline reference. This page does not load a hosted API console.</p>
+<ul>
+<li><code>GET /health</code> egress mode</li>
+<li><code>GET /api/v1/skills</code> on-disk skill catalog</li>
+<li><code>POST /api/v1/briefings</code> create a briefing</li>
+<li><code>POST /api/v1/briefings/{id}/assets</code> upload</li>
+<li><code>POST /api/v1/briefings/{id}/jobs</code> transcribe, compile, render, index</li>
+<li><code>GET /api/v1/briefings/{id}/script</code></li>
+<li><code>POST /api/v1/briefings/{id}/chat</code> local retrieval</li>
+<li><code>POST /api/v1/help/chat</code> how to use the tool</li>
+<li><code>GET /api/v1/artifacts/{id}/file</code> watchable file</li>
+</ul>
+</body></html>
+"""
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1:3000", "http://localhost:3000"],
@@ -54,8 +83,14 @@ class ChatIn(BaseModel):
 
 @app.get("/health")
 def health():
-    ok = ping()
-    return {"ok": ok, "egress": "aws-in-region", "chat": "bedrock"}
+    from grounded.egress import health_report
+
+    return health_report(ping(), settings.minio_endpoint)
+
+
+@app.get("/docs", include_in_schema=False)
+def local_docs():
+    return HTMLResponse(_LOCAL_DOCS, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/")
@@ -309,9 +344,31 @@ def artifact_file(artifact_id: str, request: Request, db: Session = Depends(get_
     return Response(content=body, status_code=status, headers=headers)
 
 
+@app.get("/api/v1/skills")
+def list_skills():
+    from grounded.catalog import CatalogError, load_catalog, load_crafts
+
+    try:
+        skills = load_catalog()
+        crafts = load_crafts()
+    except CatalogError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    return {"offline": True, "skills": skills, "crafts": crafts}
+
+
+@app.post("/api/v1/help/chat")
+def help_chat(body: ChatIn):
+    from grounded.chat import answer_grounded
+
+    question = (body.question or "").strip()
+    if not question:
+        raise HTTPException(400, "question is required")
+    return answer_grounded({"beats": []}, question[:2000])
+
+
 @app.post("/api/v1/briefings/{briefing_id}/chat")
 def briefing_chat(briefing_id: str, body: ChatIn, db: Session = Depends(get_db)):
-    from grounded.chat import answer_with_claude
+    from grounded.chat import answer_grounded
 
     question = (body.question or "").strip()
     if not question:
@@ -329,7 +386,7 @@ def briefing_chat(briefing_id: str, body: ChatIn, db: Session = Depends(get_db))
     if not row:
         raise HTTPException(404, "no script yet")
     raw = row[0] if isinstance(row[0], dict) else json.loads(row[0])
-    return answer_with_claude(raw, question[:2000])
+    return answer_grounded(raw, question[:2000], briefing_id=briefing_id, db=db)
 
 
 def _public_row(row) -> dict:

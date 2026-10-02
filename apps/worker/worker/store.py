@@ -56,6 +56,9 @@ ARTIFACT_KINDS = {
     "guide.md": "guide",
     "voiceover.mp3": "voiceover",
     "source.mp4": "source",
+    "mix.json": "mix",
+    "placement.json": "placement",
+    "quality.json": "quality",
 }
 
 CONTENT_TYPES = {
@@ -65,6 +68,7 @@ CONTENT_TYPES = {
     ".html": "text/html",
     ".md": "text/markdown",
     ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
 }
 
 
@@ -105,6 +109,12 @@ def _store_client(
     region: str,
     client: S3Client | None,
 ):
+    from grounded.egress import EgressError, assert_object_store
+
+    try:
+        assert_object_store(endpoint)
+    except EgressError as exc:
+        raise StoreError(str(exc)) from exc
     if client is not None:
         return client
     try:

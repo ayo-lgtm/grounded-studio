@@ -76,6 +76,23 @@ Chrome stays in `apps/engine/grounded/house.py`. A skill picks a story and a lay
 - [wbr-ask-pack](wbr-ask-pack/SKILL.md) — One ask slide per row on the ask sheet, with the owner only when that cell is filled.
 - [wbr-commentary-lock](wbr-commentary-lock/SKILL.md) — Allow narrative sentences only from commentary cells, and numbers only from numeric cells.
 
+## Continuity and offline studio
+
+Original offline playbooks. Not a hosted skill pack.
+
+- [continuous-take-demo](continuous-take-demo/SKILL.md) — One take from a real capture. Every boundary keeps a survivor.
+- [carry-boundary-verify](carry-boundary-verify/SKILL.md) — Fail when a boundary replaces the picture.
+- [offline-quality-gate](offline-quality-gate/SKILL.md) — Pass, warn, or fail before a share link.
+- [offline-refine-loop](offline-refine-loop/SKILL.md) — Cheapest local fix for a gate finding.
+- [placement-formats-export](placement-formats-export/SKILL.md) — 16:9, 9:16, and 1:1 with a safe zone.
+- [brand-kit-lock](brand-kit-lock/SKILL.md) — Palette and type from house.py.
+- [storyboard-from-chapters](storyboard-from-chapters/SKILL.md) — Panels from cited chapters.
+- [text-overlay-cards](text-overlay-cards/SKILL.md) — House labels on the source frame.
+- [local-video-assembly](local-video-assembly/SKILL.md) — Concat the EDL locally.
+- [caption-studio-local](caption-studio-local/SKILL.md) — Captions from local faster-whisper.
+- [identity-consistency-lock](identity-consistency-lock/SKILL.md) — Screens the capture actually showed.
+- [narration-room-mix](narration-room-mix/SKILL.md) — Local voice, loudness, duck, short room.
+
 ## Crafts
 
 Reusable modules: [skills/_crafts](_crafts/). A craft does not ship a briefing alone.

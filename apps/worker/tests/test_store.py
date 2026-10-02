@@ -59,6 +59,17 @@ class StoreTest(unittest.TestCase):
             self.assertEqual(dest.read_bytes(), payload)
         self.assertEqual(s3.requested, {"Bucket": "grounded", "Key": "briefings/x/upload.mp4"})
 
+    def test_public_endpoint_is_refused_before_the_client(self):
+        s3 = FakeS3(b"secret")
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(StoreError) as caught:
+                download_file(
+                    "https://t3.storageapi.dev", "grounded", "k", "ak", "sk",
+                    Path(tmp) / "f.mp4", client=s3,
+                )
+        self.assertIn("public", str(caught.exception))
+        self.assertIsNone(s3.requested)
+
     def test_client_failure_raises_store_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(StoreError):
