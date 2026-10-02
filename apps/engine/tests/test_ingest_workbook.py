@@ -63,6 +63,7 @@ class WorkbookIngestTest(unittest.TestCase):
         self.assertEqual(script["renderer"], "deck")
         self.assertEqual(script["provenance"]["skill_id"], "finance-wbr")
         self.assertIn("workbook-analysis", script["provenance"]["craft_versions"])
+        self.assertIn("source-range", [beat["layout"] for beat in script["beats"]])
         self.assertEqual(validate_script(script), [])
 
 
