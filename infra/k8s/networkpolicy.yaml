@@ -1,0 +1,98 @@
+# Kubernetes egress controls for a Grounded Studio namespace.
+#
+# 1. default-deny-all: no pod may send or receive anything unless a later
+#    policy allows it. An application bug cannot reach the internet.
+# 2. allow-dns: kube-dns only.
+# 3. allow-in-namespace: api/worker <-> postgres, redis, minio, model server.
+# 4. allow-ingress-from-sso-proxy: the company SSO ingress reaches the api only.
+# 5. (aws-private only) allow-aws-vpc-endpoints: HTTPS to the VPC-endpoint
+#    subnet CIDRs. Delete this policy in offline mode.
+#
+# Requires a CNI that enforces NetworkPolicy (Calico, Cilium, AWS VPC CNI
+# with network policy enabled).
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: grounded-studio
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: grounded-studio
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-in-namespace
+  namespace: grounded-studio
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-from-sso-proxy
+  namespace: grounded-studio
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-sso
+      ports:
+        - { protocol: TCP, port: 8000 }
+---
+# aws-private profile only. Replace with the CIDRs of the subnets that hold
+# the bedrock-runtime / sts / kms / logs interface endpoints. S3 gateway
+# endpoint traffic additionally needs the S3 prefix-list ranges.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-aws-vpc-endpoints
+  namespace: grounded-studio
+  labels:
+    grounded.profile: aws-private
+spec:
+  podSelector:
+    matchLabels:
+      grounded.egress/aws-endpoints: "true"
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 10.42.1.0/24
+        - ipBlock:
+            cidr: 10.42.2.0/24
+      ports:
+        - { protocol: TCP, port: 443 }

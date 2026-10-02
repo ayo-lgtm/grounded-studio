@@ -1,12 +1,13 @@
 -- Grounded Studio v1 schema
--- Postgres 16 + pgvector
+-- Postgres 16 + pgvector >= 0.5 (HNSW)
+-- Fresh databases apply this file; existing ones apply schema/migrations/*.sql.
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TYPE workspace_role AS ENUM ('admin', 'owner', 'editor', 'viewer');
-CREATE TYPE asset_kind AS ENUM ('recording', 'workbook', 'document', 'attachment');
+CREATE TYPE asset_kind AS ENUM ('recording', 'workbook', 'document', 'attachment', 'presentation', 'image', 'package');
 CREATE TYPE briefing_state AS ENUM ('draft', 'compiling', 'review', 'rendering', 'published', 'archived');
 CREATE TYPE job_type AS ENUM (
   'ingest', 'transcribe', 'parse', 'compile', 'qa', 'render', 'index', 'localize', 'diff'
@@ -71,9 +72,14 @@ CREATE TABLE source_assets (
   bytes         BIGINT NOT NULL,
   sha256        TEXT NOT NULL,
   minio_key     TEXT NOT NULL,
+  parent_asset_id UUID REFERENCES source_assets(id) ON DELETE CASCADE,
+  detected_format TEXT,
+  duration_ms   INT,
+  normalized_at TIMESTAMPTZ,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX source_assets_sha ON source_assets (sha256);
+CREATE INDEX source_assets_briefing ON source_assets (briefing_id);
 
 CREATE TABLE transcript_segments (
   id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -92,7 +98,18 @@ CREATE TABLE workbook_cells (
   value_num     DOUBLE PRECISION,
   value_text    TEXT,
   fmt           TEXT,
+  formula       TEXT,
   UNIQUE (asset_id, sheet, addr)
+);
+
+CREATE TABLE workbook_rows (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  asset_id      UUID NOT NULL REFERENCES source_assets(id) ON DELETE CASCADE,
+  sheet         TEXT NOT NULL,
+  row_num       INT NOT NULL,
+  range_ref     TEXT NOT NULL,
+  text          TEXT NOT NULL,
+  UNIQUE (asset_id, sheet, row_num)
 );
 
 CREATE TABLE document_blocks (
@@ -102,6 +119,8 @@ CREATE TABLE document_blocks (
   heading_path  TEXT,
   page          INT,
   text          TEXT NOT NULL,
+  extractor     TEXT,
+  ord           INT NOT NULL DEFAULT 0,
   UNIQUE (asset_id, block_id)
 );
 
@@ -112,6 +131,10 @@ CREATE TABLE script_versions (
   accepted      BOOLEAN NOT NULL DEFAULT FALSE,
   accepted_by   UUID REFERENCES users(id),
   raw_json      JSONB NOT NULL,
+  skill_id      TEXT,
+  skill_version TEXT,
+  provenance    JSONB NOT NULL DEFAULT '{}',
+  providers     JSONB NOT NULL DEFAULT '{}',
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (briefing_id, version)
 );
@@ -135,8 +158,27 @@ CREATE TABLE citations (
   t_end_ms        INT,
   sheet           TEXT,
   addr            TEXT,
-  block_id        TEXT
+  block_id        TEXT,
+  page            INT,
+  range_ref       TEXT
 );
+CREATE INDEX citations_beat ON citations (beat_id);
+
+CREATE TABLE claims (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  beat_id         UUID NOT NULL REFERENCES script_beats(id) ON DELETE CASCADE,
+  citation_id     UUID REFERENCES citations(id) ON DELETE CASCADE,
+  value           DOUBLE PRECISION NOT NULL,
+  unit            TEXT,
+  sheet           TEXT,
+  addr            TEXT,
+  block_id        TEXT,
+  derived         BOOLEAN NOT NULL DEFAULT FALSE,
+  in_text         BOOLEAN NOT NULL DEFAULT FALSE,
+  formula         TEXT,
+  operands        JSONB NOT NULL DEFAULT '[]'
+);
+CREATE INDEX claims_beat ON claims (beat_id);
 
 CREATE TABLE artifacts (
   id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -165,11 +207,15 @@ CREATE TABLE embedding_chunks (
   kind          TEXT NOT NULL,
   text          TEXT NOT NULL,
   span          JSONB NOT NULL,
-  embedding     VECTOR(768) NOT NULL
+  model         TEXT NOT NULL DEFAULT 'sha256-bag-768',
+  dims          INT NOT NULL DEFAULT 768,
+  embedding     VECTOR NOT NULL
 );
 CREATE INDEX embedding_chunks_briefing ON embedding_chunks (briefing_id);
-CREATE INDEX embedding_chunks_ivf ON embedding_chunks
-  USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX embedding_chunks_768 ON embedding_chunks
+  USING hnsw ((embedding::vector(768)) vector_cosine_ops) WHERE dims = 768;
+CREATE INDEX embedding_chunks_1024 ON embedding_chunks
+  USING hnsw ((embedding::vector(1024)) vector_cosine_ops) WHERE dims = 1024;
 
 CREATE TABLE chat_sessions (
   id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -184,6 +230,8 @@ CREATE TABLE chat_messages (
   role          TEXT NOT NULL,
   text          TEXT NOT NULL,
   citation_ids  UUID[] NOT NULL DEFAULT '{}',
+  citations     JSONB NOT NULL DEFAULT '[]',
+  provider      TEXT,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

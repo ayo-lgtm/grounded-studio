@@ -5,9 +5,9 @@ Internal briefing system for recurring work communication.
 Drop in a **screen recording**, a **Word/PDF/Notion export**, or an **Excel pack**.
 Get back a **reusable briefing object**: narrated walkthrough, slides, chapters, citations, and a chat that is not allowed to invent.
 
-**Hard constraint:** no internal data leaves the company network. Models, storage, transcription, and TTS all run in-house.
+**Hard constraint:** no internal data leaves company-controlled infrastructure. In the default `offline` profile, models, storage, transcription and TTS all run in-house. The optional `aws-private` profile may use company-approved Amazon Bedrock / Nova models only through allowlisted private VPC endpoints.
 
-This repository is the product spec and implementation contract. Application code comes next; the documents here are the source of truth for what to build.
+This repository holds the product spec, the skill contracts, and the implementation in `apps/`.
 
 ## Why this exists
 
@@ -39,6 +39,8 @@ Existing tools either send data to a SaaS model or generate cinematic video that
 | [docs/08-build-plan.md](docs/08-build-plan.md) | Phased build for a job-internal v1 |
 | [docs/09-api.md](docs/09-api.md) | HTTP API sketch |
 | [docs/13-house-style.md](docs/13-house-style.md) | Locked type, color, and the two renderers |
+| [docs/17-offline-egress.md](docs/17-offline-egress.md) | Offline profile and `/health` |
+| [docs/18-deployment-profiles.md](docs/18-deployment-profiles.md) | `offline` vs `aws-private` (Bedrock/Nova), providers, grounding with models, egress layers |
 | [schema/schema.sql](schema/schema.sql) | Postgres schema |
 | [skills/](skills/) | Skill definitions the router loads |
 
@@ -52,8 +54,8 @@ Existing tools either send data to a SaaS model or generate cinematic video that
 | Files | MinIO (S3 API) on internal disk | Recordings never leave VPC |
 | Queue | Redis + workers | Long jobs |
 | ASR | faster-whisper (local GPU/CPU) | Transcripts stay inside |
-| LLM | vLLM or Ollama, company-approved model | No OpenAI/Anthropic egress |
-| Embeddings | local embedding model | RAG without cloud |
+| LLM | none (retrieval), internal vLLM/Ollama, or Amazon Nova via Bedrock in the `aws-private` profile | No OpenAI/Anthropic public egress |
+| Embeddings | local hash embedder, or Bedrock (Titan v2 / Nova) in `aws-private` | RAG without public APIs |
 | TTS | Piper or Kokoro local | Narration without ElevenLabs |
 | Render | Remotion or HTML-to-MP4 (Hyperframes self-hosted) | Deterministic, no Veo |
 | Player | first-party web player | Chapters + grounded chat |
@@ -62,14 +64,45 @@ Cloud SaaS video models (Veo, Runway, HeyGen, BookWatch-style generators) are **
 
 ## Status
 
-House style, both renderers, and the skill compilers live in `apps/engine`.
-Chat answers from the briefing or from `docs/` and `skills/` on disk. Narration is local Piper or Kokoro. Transcription is local faster-whisper. `/health` reports `egress: offline` when object storage is on a private host. See [docs/17-offline-egress.md](docs/17-offline-egress.md).
+Implemented in `apps/`:
 
-A local run writes decks and edit lists to `out/demo`:
+* **Two deployment profiles.** `offline` (default) keeps everything on
+  private infrastructure. `aws-private` adds explicitly allowlisted Amazon
+  Bedrock / Nova models, regions, VPC endpoints and buckets. Everything else
+  is refused, in both. See [docs/18](docs/18-deployment-profiles.md).
+* **Native sources.** Excel (`.xlsx`/`.xlsm`, formulas evaluated locally when
+  uncached), CSV, Word, text-layer PDF, PowerPoint, Markdown/text,
+  screenshots (local OCR or Nova), recordings (local faster-whisper), and
+  `.zip` packages of these. Cells, rows, blocks and transcript segments are
+  persisted with their locations.
+* **Executable skills.** Weekly Ops Review / WBR, Finance WBR, Half-Year and
+  Executive Business Review (and the rest of the catalog) are runtime
+  contracts: accepted inputs, layouts, slide caps and deterministic check ids
+  are read from `SKILL.md`, and skill/craft versions and hashes are recorded
+  in every script.
+* **Grounding.** Every claim cites a cell/range, block/page/slide, or
+  timestamp; derived numbers are recomputed from cited cells; citations and
+  claims are persisted and verified against the normalized source rows
+  before a script ships. Chat answers only from the briefing or says "That
+  is not in this briefing."
+* **Security.** OIDC or SSO-proxy auth with workspace RBAC on every data
+  endpoint; streamed, hashed uploads; private storage only; content-free
+  logs; a socket-level egress guard; infra egress-deny for Compose,
+  Kubernetes and AWS.
+
+Local demo (synthetic fixtures):
 
 ```bash
 PYTHONPATH=apps/engine python -m grounded.demo out/demo
 PYTHONPATH=apps/engine python -m grounded.studio out/demo
 ```
 
-Open http://127.0.0.1:8765. The weekly deck, the leadership deck, and the walkthrough player are on that page. The film is an edit of a source recording: filler and dead air are cut, captions and chapter cards are added, and a click zooms the source pixels. Chat on that page quotes the weekly pack or refuses.
+Tests (synthetic data only):
+
+```bash
+pip install -r apps/api/requirements.txt -r apps/worker/requirements.txt -r requirements-test.txt
+PYTHONPATH=apps/engine GROUNDED_SKILLS_ROOT=skills python -m unittest discover -s apps/engine/tests
+PYTHONPATH=apps/worker:apps/engine python -m unittest discover -s apps/worker/tests
+PYTHONPATH=apps/api:apps/engine python -m unittest discover -s apps/api/tests
+python -m unittest tests/e2e/test_private_stack.py   # needs postgres+pgvector, redis-server, ffmpeg
+```

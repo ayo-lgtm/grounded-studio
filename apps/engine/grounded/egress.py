@@ -1,143 +1,87 @@
-"""Egress policy.
+"""Compatibility surface over :mod:`grounded.policy`.
 
-Default mode is offline. Public generative APIs are never called.
-A public object-store host is refused unless an operator explicitly
-sets EGRESS_MODE=aws-in-region, and even then chat, TTS, and ASR stay local.
+Older modules import these helpers. Every decision is made by the active
+deployment policy; nothing here can widen it.
 """
 
 from __future__ import annotations
 
-import ipaddress
-import os
-from urllib.parse import urlparse
+from .policy import EgressError, from_env, host_of
 
-PUBLIC_SUFFIXES = (
-    "storageapi.dev",
-    "amazonaws.com",
-    "tigris.dev",
-    "r2.cloudflarestorage.com",
-    "storage.googleapis.com",
-    "blob.core.windows.net",
-    "railway.app",
-    "openai.com",
-    "anthropic.com",
-    "elevenlabs.io",
-    "jsdelivr.net",
-    "huggingface.co",
-    "scenario.com",
-    "runwayml.com",
-    "heygen.com",
-    "slides.com",
-    "googleapis.com",
-)
-
-# Hosts the offline profile may call. Everything else is public.
-PRIVATE_SUFFIXES = (
-    "railway.internal",
-    "internal",
-    "local",
-)
-
-
-class EgressError(Exception):
-    pass
+__all__ = [
+    "EgressError",
+    "assert_object_store",
+    "assert_private_model",
+    "health_report",
+    "host_of",
+    "is_private_host",
+    "is_public_host",
+    "mode",
+    "object_store_label",
+    "offline",
+]
 
 
 def mode() -> str:
-    raw = (os.environ.get("EGRESS_MODE") or "offline").strip().lower()
-    if raw in {"aws", "aws-in-region", "bedrock"}:
-        return "aws-in-region"
-    return "offline"
+    return from_env().mode
 
 
 def offline() -> bool:
-    return mode() == "offline"
-
-
-def host_of(endpoint: str) -> str:
-    text = (endpoint or "").strip()
-    if not text:
-        return ""
-    parsed = urlparse(text if "://" in text else f"http://{text}")
-    return (parsed.hostname or "").lower().rstrip(".")
+    return from_env().offline
 
 
 def is_private_host(host: str) -> bool:
-    name = (host or "").lower().rstrip(".")
-    if not name:
-        return False
-    if name in {"localhost", "minio", "postgres", "redis", "pgvector", "ollama", "vllm"}:
-        return True
-    if "." not in name:
-        # Docker/Railway service names on the private network.
-        return True
-    if any(name == suffix or name.endswith("." + suffix) for suffix in PRIVATE_SUFFIXES):
-        return True
-    try:
-        ip = ipaddress.ip_address(name)
-    except ValueError:
-        return False
-    return bool(ip.is_private or ip.is_loopback or ip.is_link_local)
+    return from_env().is_private_host(host)
 
 
 def is_public_host(host: str) -> bool:
-    name = (host or "").lower().rstrip(".")
-    if not name:
-        return True
-    if any(name == suffix or name.endswith("." + suffix) for suffix in PUBLIC_SUFFIXES):
-        return True
-    return not is_private_host(name)
+    return not from_env().is_private_host(host)
 
 
-def assert_object_store(endpoint: str) -> None:
-    """Refuse a public object store while the process is in offline mode."""
-    if not offline():
-        return
-    host = host_of(endpoint)
-    if is_public_host(host):
-        raise EgressError(
-            f"object store host {host or '(missing)'} is public; "
-            "offline mode refuses it. Point MINIO_ENDPOINT at in-network MinIO."
-        )
+def assert_object_store(endpoint: str, bucket: str | None = None) -> None:
+    from_env().check_object_store(endpoint, bucket)
 
 
 def assert_private_model(base_url: str) -> str:
-    """Return a private model base URL, or raise. Empty is not configured."""
+    """An OpenAI-compatible model server must be on private infrastructure."""
     url = (base_url or "").strip()
     if not url:
         raise EgressError("no private model endpoint configured")
+    policy = from_env()
     host = host_of(url)
-    if not is_private_host(host) or is_public_host(host):
-        raise EgressError(f"model host {host or '(missing)'} is not a private endpoint")
+    if not policy.is_private_host(host):
+        raise EgressError(f"model host {host or '(missing)'} is not private infrastructure")
     return url.rstrip("/")
 
 
-def object_store_label(endpoint: str) -> str:
-    if is_public_host(host_of(endpoint)):
-        return "public"
-    return "private"
+def object_store_label(endpoint: str, bucket: str | None = None) -> str:
+    return from_env().object_store_label(endpoint, bucket)
 
 
-def health_report(db_ok: bool, object_endpoint: str) -> dict[str, object]:
-    """Honest status. ok is false when the database is down or offline mode is blocked."""
-    store = object_store_label(object_endpoint)
-    if offline() and store == "public":
-        egress = "blocked"
-        ok = False
-        store_label = "public-refused"
-    elif offline():
-        egress = "offline"
-        ok = bool(db_ok)
-        store_label = "private"
-    else:
-        egress = "aws-in-region"
-        ok = bool(db_ok)
-        store_label = store
+def health_report(db_ok: bool, object_endpoint: str, bucket: str | None = None) -> dict[str, object]:
+    """Non-sensitive runtime posture. No hostnames, keys or content."""
+    from .providers import registry
+
+    try:
+        policy = from_env()
+    except EgressError:
+        return {"ok": False, "egress": "misconfigured", "object_store": "unknown"}
+    store = policy.object_store_label(object_endpoint, bucket)
+    try:
+        selection = registry.selection()
+        providers = selection.describe()
+        provider_ok = True
+    except Exception:  # noqa: BLE001 - surfaced as not-ok, never as detail
+        providers = {"inference": "misconfigured"}
+        provider_ok = False
+    ok = bool(db_ok) and store != "public-refused" and provider_ok
     return {
         "ok": ok,
-        "egress": egress,
-        "chat": "retrieval",
-        "narration": "local",
-        "transcription": "local",
-        "object_store": store_label,
+        "egress": policy.mode if store != "public-refused" else "blocked",
+        "deployment_mode": policy.mode,
+        "chat": "retrieval" if providers.get("chat_phrasing") in {None, "none"} else "retrieval+validated-phrasing",
+        "narration": providers.get("tts", "local"),
+        "transcription": providers.get("transcription", "local"),
+        "providers": providers,
+        "object_store": store,
     }

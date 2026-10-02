@@ -1,61 +1,84 @@
-# Pilot deploy on an internal box (single host).
-# Default is offline: in-network MinIO, local faster-whisper, local Piper.
-# Do not point chat, TTS, or ASR at Bedrock, Transcribe, or Polly.
+# Offline profile on one internal host.
+#
+# Egress control at the infrastructure layer: postgres, redis, minio, api,
+# worker (and the optional model server) sit only on the `private` network,
+# which is `internal: true` - Docker gives it no route off the host, so an
+# application bug cannot reach the internet. The only container on a
+# routable network is `gateway`, a reverse proxy that forwards to the api
+# and holds no data. Put the company SSO proxy / VPN in front of it.
+#
+#   cp .env.example .env   # set passwords and AUTH_*
+#   docker compose -f infra/compose.yaml up -d --build
+
+x-runtime: &runtime
+  GROUNDED_DEPLOYMENT_MODE: offline
+  GROUNDED_ENV: ${GROUNDED_ENV:-production}
+  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-grounded}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-grounded}
+  REDIS_URL: redis://redis:6379/0
+  MINIO_ENDPOINT: http://minio:9000
+  MINIO_BUCKET: ${MINIO_BUCKET:-grounded}
+  MINIO_REGION: ${MINIO_REGION:-us-east-1}
+  MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-grounded}
+  MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+  GROUNDED_INFERENCE_PROVIDER: ${GROUNDED_INFERENCE_PROVIDER:-none}
+  GROUNDED_ASSIST_FEATURES: ${GROUNDED_ASSIST_FEATURES:-}
+  MODEL_BASE_URL: ${MODEL_BASE_URL:-}
+  MODEL_NAME: ${MODEL_NAME:-local-instruct}
+  GROUNDED_TRANSCRIPTION_PROVIDER: local
+  GROUNDED_TTS_PROVIDER: ${GROUNDED_TTS_PROVIDER:-local}
+  GROUNDED_IMAGE_TEXT_PROVIDER: ${GROUNDED_IMAGE_TEXT_PROVIDER:-local-ocr}
+  HF_HUB_OFFLINE: "1"
+  TRANSFORMERS_OFFLINE: "1"
 
 services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-grounded}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-grounded}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ../schema/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-    ports:
-      - "127.0.0.1:5432:5432"
+    networks: [private]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U grounded"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-grounded}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "127.0.0.1:6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--protected-mode", "yes"]
+    networks: [private]
 
   minio:
-    # Docker Hub dropped minio/minio. elestio/minio runs as root; see docs/16-railway.md.
+    # Docker Hub dropped minio/minio; elestio/minio runs as root on a fresh volume.
     image: elestio/minio:latest
     command: minio server /data --address ":9000" --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-grounded}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-change-me-too}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+      MINIO_BROWSER: "off"
     volumes:
       - miniodata:/data
-    ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
+    networks: [private]
 
   api:
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
-    env_file:
-      - ../.env
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-grounded}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-grounded}
-      REDIS_URL: redis://redis:6379/0
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-grounded}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change-me-too}
-      MINIO_BUCKET: ${MINIO_BUCKET:-grounded}
-      MINIO_REGION: ${MINIO_REGION:-us-east-1}
-      EGRESS_MODE: ${EGRESS_MODE:-offline}
-      MODEL_BASE_URL: ${MODEL_BASE_URL:-}
-    ports:
-      - "127.0.0.1:8000:8000"
+      <<: *runtime
+      AUTH_MODE: ${AUTH_MODE:?set AUTH_MODE (oidc or trusted-header)}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      OIDC_JWKS_FILE: ${OIDC_JWKS_FILE:-}
+      OIDC_JWKS_URL: ${OIDC_JWKS_URL:-}
+      AUTH_PROXY_SECRET: ${AUTH_PROXY_SECRET:-}
+      AUTH_USER_HEADER: ${AUTH_USER_HEADER:-X-Authenticated-User}
+      BOOTSTRAP_ADMINS: ${BOOTSTRAP_ADMINS:-}
+    networks: [private]
     depends_on:
       postgres:
         condition: service_healthy
@@ -68,28 +91,37 @@ services:
     build:
       context: ..
       dockerfile: apps/worker/Dockerfile
-    env_file:
-      - ../.env
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-grounded}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-grounded}
-      REDIS_URL: redis://redis:6379/0
-      EGRESS_MODE: ${EGRESS_MODE:-offline}
-      MODEL_BASE_URL: ${MODEL_BASE_URL:-}
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_BUCKET: ${MINIO_BUCKET:-grounded}
-      MINIO_REGION: ${MINIO_REGION:-us-east-1}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-grounded}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change-me-too}
-      TRANS_PROVIDER: ${TRANS_PROVIDER:-local}
-      TRANS_LANGUAGE: ${TRANS_LANGUAGE:-en-US}
-      NARRATION_PROVIDER: ${NARRATION_PROVIDER:-local}
-      WHISPER_MODEL: ${WHISPER_MODEL:-base}
-      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+      <<: *runtime
+    networks: [private]
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_started
+
+  gateway:
+    # The only container with a routable network. It forwards HTTP to the
+    # api and stores nothing. Bind it to the host's internal interface.
+    image: caddy:2-alpine
+    command: ["caddy", "reverse-proxy", "--from", ":8080", "--to", "api:8000"]
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks: [private, edge]
+    depends_on: [api]
+
+  # Optional internal model server. Weights must already be on the volume.
+  # vllm:
+  #   image: vllm/vllm-openai:latest
+  #   command: ["--model", "/models/your-approved-model", "--served-model-name", "local-instruct"]
+  #   environment: { HF_HUB_OFFLINE: "1" }
+  #   volumes: ["/srv/models:/models:ro"]
+  #   networks: [private]
+
+networks:
+  private:
+    internal: true
+  edge: {}
 
 volumes:
   pgdata:

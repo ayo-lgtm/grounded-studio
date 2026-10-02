@@ -493,6 +493,9 @@ const CHOICES = [
   ["product-walkthrough", "Walkthrough"],
   ["continuous-take-demo", "Continuous"],
   ["weekly-ops-review", "Weekly"],
+  ["finance-wbr", "Finance"],
+  ["half-year-business-review", "Half-year"],
+  ["executive-business-review", "Exec review"],
   ["wbr-executive", "WBR"],
   ["still-sequence-slideshow", "Slideshow"],
   ["leadership-brief", "Brief"],
@@ -507,12 +510,18 @@ const SKILL_WORD = {
   "sop-training": "Procedure",
   "feature-delta": "What changed",
   "weekly-ops-review": "Weekly",
+  "finance-wbr": "Finance",
+  "half-year-business-review": "Half-year",
+  "executive-business-review": "Exec review",
   "leadership-brief": "Brief",
   "launch-announcement": "Launch",
   localize: "Briefing",
 };
 const SKILL_EYEBROW = {
   "weekly-ops-review": "Weekly operating review",
+  "finance-wbr": "Finance weekly business review",
+  "half-year-business-review": "Half-year business review",
+  "executive-business-review": "Executive business review",
   "leadership-brief": "Leadership brief",
   "launch-announcement": "Launch",
   "sop-training": "Procedure",
@@ -520,7 +529,7 @@ const SKILL_EYEBROW = {
   "feature-delta": "What changed",
   localize: "Briefing",
 };
-const LAYOUTS = new Set(["cover", "big-number", "versus-target", "movers", "risk", "ask", "statement", "step"]);
+const LAYOUTS = new Set(["cover", "big-number", "versus-target", "movers", "source-range", "risk", "ask", "statement", "step"]);
 const DECK_FIT = "html,body{height:100%;margin:0;overflow:hidden}.deck{height:100% !important;overflow-y:auto !important;scrollbar-width:none}.deck::-webkit-scrollbar{display:none}.slide{height:100% !important;overflow:hidden !important;container-type:size !important;box-sizing:border-box !important;display:flex !important;align-items:center !important;justify-content:center !important}.frame{width:min(1180px,calc(100cqw - 28px),calc((100cqh - 8px) * 16 / 9)) !important;height:auto !important;aspect-ratio:16/9 !important}@container (max-width: 520px){.frame{width:calc(100cqw - 20px) !important;max-height:calc(100cqh - 12px) !important;aspect-ratio:auto !important;padding:16px 14px 10px !important}.cover h1{font-size:32px !important;line-height:1.05 !important}h1{font-size:22px !important;line-height:1.2 !important}}";
 
 const room = {
@@ -1108,11 +1117,11 @@ async function project() {
 
 async function begin(file) {
   if (room.busy) return;
-  if (/\.xlsx?$/i.test(file.name)) {
+  if (/\.(xls|doc|ppt)$/i.test(file.name)) {
     showSheet({
-      eyebrow: "Workbook",
-      title: "This file is a spreadsheet.",
-      lead: "A workbook has to be the JSON pack.",
+      eyebrow: "Legacy file",
+      title: "This is a legacy Office binary.",
+      lead: "Save it as .xlsx, .docx or .pptx and drop it again.",
       bad: true,
     });
     hideScrub();
@@ -1162,15 +1171,19 @@ async function runJob(id, type) {
   throw new Error("Still working. It is taking longer than expected.");
 }
 
+const WORKBOOK_SKILLS = new Set(["weekly-ops-review", "finance-wbr", "half-year-business-review", "executive-business-review", "wbr-executive", "wbr-kpi-spine", "kpi-spotlight-deck"]);
+const DOCUMENT_SKILLS = new Set(["leadership-brief", "launch-announcement", "executive-business-review"]);
+
 function planFor(file) {
   const name = file.name.toLowerCase();
-  if (name.endsWith(".docx")) {
-    const skill = room.skill === "launch-announcement" ? "launch-announcement" : "leadership-brief";
-    return { skill, kind: "document" };
+  if (/\.(xlsx|xlsm|csv)$/.test(name)) {
+    return { skill: WORKBOOK_SKILLS.has(room.skill) ? room.skill : "weekly-ops-review", kind: "workbook" };
   }
-  if (name.endsWith(".json")) {
-    const workbook = new Set(["weekly-ops-review", "wbr-executive", "wbr-kpi-spine", "kpi-spotlight-deck"]);
-    return { skill: workbook.has(room.skill) ? room.skill : "weekly-ops-review", kind: "workbook" };
+  if (/\.(docx|pdf|txt|md|pptx|png|jpe?g|gif|webp)$/.test(name)) {
+    return { skill: DOCUMENT_SKILLS.has(room.skill) ? room.skill : "leadership-brief", kind: "document" };
+  }
+  if (name.endsWith(".zip")) {
+    return { skill: WORKBOOK_SKILLS.has(room.skill) ? room.skill : "executive-business-review", kind: "package" };
   }
   const recording = new Set(["product-walkthrough", "sop-training", "feature-delta", "continuous-take-demo", "still-sequence-slideshow", "chaptered-demo-cut"]);
   return { skill: recording.has(room.skill) ? room.skill : "product-walkthrough", kind: "recording" };
@@ -1300,8 +1313,9 @@ function unwrap(row) {
 function skillWord(skill) { return SKILL_WORD[skill] || "Briefing"; }
 
 function skillHint(skill) {
-  if (skill === "weekly-ops-review" || skill === "wbr-executive" || skill === "wbr-kpi-spine") return "A workbook as JSON. Empty KPIs fail.";
-  if (skill === "leadership-brief" || skill === "launch-announcement") return "A Word file.";
+  if (skill === "executive-business-review") return "A workbook, documents, a deck, or a .zip of them. Every number cites its cell.";
+  if (skill === "weekly-ops-review" || skill === "finance-wbr" || skill === "half-year-business-review" || skill === "wbr-executive" || skill === "wbr-kpi-spine") return "An Excel or CSV workbook (or a .zip with its memo). Every number cites its cell.";
+  if (skill === "leadership-brief" || skill === "launch-announcement") return "A Word, PDF, PowerPoint, Markdown file or screenshot.";
   if (skill === "continuous-take-demo") return "A screen recording. Each beat keeps a frame from the last.";
   if (skill === "still-sequence-slideshow") return "A screen recording, advanced as cited stills.";
   return "A screen recording.";

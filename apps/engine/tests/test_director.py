@@ -44,14 +44,24 @@ PACK = {
 }
 
 
-class FakeConverse:
+class FakeModel:
+    """Stands in for any InferenceProvider (local or Bedrock/Nova)."""
+
+    name = "fake"
+    model_id = "fake-model"
+
     def __init__(self, texts):
         self._texts = list(texts)
         self.calls = 0
 
-    def converse(self, **kwargs):
+    def complete(self, system, prompt, **kwargs):
+        from grounded.providers.base import InferenceResult
+
         self.calls += 1
-        return {"output": {"message": {"content": [{"text": self._texts.pop(0)}]}}}
+        return InferenceResult(text=self._texts.pop(0), provider=self.name, model_id=self.model_id)
+
+
+FakeConverse = FakeModel
 
 
 def _script():

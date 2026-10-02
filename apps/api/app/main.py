@@ -1,41 +1,50 @@
-"""Phase 1 API. Dev auth is a header bypass. Wire SSO before any real data lands."""
+"""Grounded Studio API. Every data endpoint is authenticated and authorized.
+
+Startup validates the deployment policy, the provider selection, the auth
+configuration and every infrastructure endpoint, then installs the socket
+egress guard. Nothing is served if any of those is wrong.
+"""
 
 from __future__ import annotations
 
-import hashlib
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response
-from pydantic import BaseModel
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from .auth import User, audit, auth_mode, authorize_briefing, current_user, role_in_workspace, ROLE_RANK
 from .db import get_db, ping
 from .queue import enqueue, new_id
-from .ranges import content_type, slice_body
+from .ranges import content_type, parse_range
 from .settings import settings
-from .storage import put_bytes, read_bytes, signed_url
-from .validation import UploadTooLarge, is_allowed_kind, read_limited, sanitize_filename
+from .storage import HashingReader, delete_object, object_size, open_range, put_fileobj
+from .validation import MAX_UPLOAD_BYTES, UploadTooLarge, is_allowed_kind, sanitize_filename
+
+from grounded import guard, logsafe
+from grounded.policy import assert_runtime
+from grounded.providers import registry
+
+POLICY = assert_runtime(
+    ("DATABASE_URL", settings.database_url),
+    ("REDIS_URL", settings.redis_url),
+    ("MODEL_BASE_URL", settings.model_base_url),
+)
+SELECTION = registry.selection()
+AUTH_MODE = auth_mode()
+guard.install(POLICY)
+logsafe.configure()
 
 _ROOM = (Path(__file__).resolve().parent / "room.html").read_text(encoding="utf-8")
 
-
-def _require_dev_auth() -> None:
-    if not settings.dev_bypass_auth:
-        raise HTTPException(501, "SSO auth is not wired yet")
-
-app = FastAPI(
-    title="Grounded Studio",
-    version="0.1.0",
-    docs_url=None,
-    redoc_url=None,
-    openapi_url=None,
-)
+app = FastAPI(title="Grounded Studio", version="0.2.0", docs_url=None, redoc_url=None, openapi_url=None)
 
 _LOCAL_DOCS = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>Grounded API</title>
@@ -45,30 +54,52 @@ code { font-family: ui-monospace, monospace; }
 </style></head>
 <body>
 <h1>Grounded API</h1>
-<p>Offline reference. This page does not load a hosted API console.</p>
+<p>Offline reference. This page does not load a hosted API console. Every
+<code>/api/v1</code> route requires company SSO.</p>
 <ul>
-<li><code>GET /health</code> egress mode</li>
+<li><code>GET /health</code> deployment mode and posture</li>
 <li><code>GET /api/v1/skills</code> on-disk skill catalog</li>
 <li><code>POST /api/v1/briefings</code> create a briefing</li>
-<li><code>POST /api/v1/briefings/{id}/assets</code> upload</li>
-<li><code>POST /api/v1/briefings/{id}/jobs</code> transcribe, compile, render, index</li>
-<li><code>GET /api/v1/briefings/{id}/script</code></li>
-<li><code>POST /api/v1/briefings/{id}/chat</code> local retrieval</li>
-<li><code>POST /api/v1/help/chat</code> how to use the tool</li>
+<li><code>POST /api/v1/briefings/{id}/assets</code> upload (xlsx, csv, docx, pdf, pptx, txt, md, png/jpg, mp4/mov/webm/mp3/wav, zip)</li>
+<li><code>POST /api/v1/briefings/{id}/jobs</code> ingest, transcribe, compile, qa, render, index</li>
+<li><code>GET /api/v1/briefings/{id}/script</code> latest script with persisted citations</li>
+<li><code>GET /api/v1/briefings/{id}/sources</code> normalized cells, blocks, segments</li>
+<li><code>POST /api/v1/briefings/{id}/chat</code> grounded chat (refuses what the sources do not say)</li>
 <li><code>GET /api/v1/artifacts/{id}/file</code> watchable file</li>
 </ul>
 </body></html>
 """
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://127.0.0.1:3000", "http://localhost:3000"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+_origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+if _origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_origins,
+        allow_methods=["GET", "POST"],
+        allow_headers=["authorization", "content-type"],
+        allow_credentials=False,
+    )
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; "
+        "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; "
+        "frame-ancestors 'self'",
+    )
+    if request.url.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 
 class BriefingIn(BaseModel):
-    title: str
+    title: str = Field(min_length=1, max_length=300)
     skill_id: str = "product-walkthrough"
     project_id: Optional[str] = None
 
@@ -78,14 +109,30 @@ class JobIn(BaseModel):
 
 
 class ChatIn(BaseModel):
-    question: str
+    question: str = Field(max_length=2000)
+
+
+class MemberIn(BaseModel):
+    email: str
+    role: str = "viewer"
+
+
+JOB_TYPES = {"ingest", "parse", "transcribe", "compile", "qa", "render", "index"}
 
 
 @app.get("/health")
 def health():
     from grounded.egress import health_report
 
-    return health_report(ping(), settings.minio_endpoint)
+    try:
+        db_ok = ping()
+    except Exception:  # noqa: BLE001
+        db_ok = False
+    report = health_report(db_ok, settings.minio_endpoint, settings.minio_bucket)
+    report["auth"] = AUTH_MODE or "unconfigured"
+    if not AUTH_MODE:
+        report["ok"] = False
+    return report
 
 
 @app.get("/docs", include_in_schema=False)
@@ -98,18 +145,96 @@ def room():
     return HTMLResponse(_ROOM, headers={"Cache-Control": "no-store"})
 
 
+# ------------------------------------------------------------ workspaces
+
+def _bootstrap_membership(db: Session, user: User) -> None:
+    """First-run: listed admins (or the dev user) get the default workspace."""
+    admins = {email.strip().lower() for email in settings.bootstrap_admins.split(",") if email.strip()}
+    if AUTH_MODE != "dev" and user.email.lower() not in admins:
+        return
+    ws = db.execute(text("SELECT id FROM workspaces WHERE slug = 'internal'")).first()
+    if ws is None:
+        ws_id = str(uuid.uuid4())
+        db.execute(text("INSERT INTO workspaces (id, name, slug) VALUES (:id, 'Internal', 'internal')"), {"id": ws_id})
+        db.execute(
+            text("INSERT INTO projects (id, workspace_id, name, created_by) VALUES (:id, :ws, 'Default', :u)"),
+            {"id": str(uuid.uuid4()), "ws": ws_id, "u": user.id},
+        )
+    else:
+        ws_id = str(ws[0])
+    db.execute(
+        text(
+            "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (:ws, :u, 'admin') "
+            "ON CONFLICT (workspace_id, user_id) DO NOTHING"
+        ),
+        {"ws": ws_id, "u": user.id},
+    )
+    db.commit()
+
+
+def _member(db: Session = Depends(get_db), user: User = Depends(current_user)) -> User:
+    _bootstrap_membership(db, user)
+    return user
+
+
+@app.get("/api/v1/projects")
+def list_projects(db: Session = Depends(get_db), user: User = Depends(_member)):
+    rows = db.execute(
+        text(
+            """
+            SELECT p.id, p.name, p.workspace_id, wm.role::text AS role
+            FROM projects p JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+            WHERE wm.user_id = :u ORDER BY p.created_at
+            """
+        ),
+        {"u": user.id},
+    ).mappings().all()
+    return {"projects": [_public_row(row) for row in rows]}
+
+
+@app.post("/api/v1/workspaces/{workspace_id}/members")
+def add_member(workspace_id: str, body: MemberIn, db: Session = Depends(get_db), user: User = Depends(_member)):
+    if role_in_workspace(db, user, workspace_id) not in {"admin", "owner"}:
+        raise HTTPException(403, "admin role required")
+    if body.role not in ROLE_RANK:
+        raise HTTPException(400, "unknown role")
+    target = db.execute(text("SELECT id FROM users WHERE lower(email) = lower(:e)"), {"e": body.email}).first()
+    if target is None:
+        raise HTTPException(404, "user has not signed in yet")
+    db.execute(
+        text(
+            "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (:ws, :u, CAST(:r AS workspace_role)) "
+            "ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = EXCLUDED.role"
+        ),
+        {"ws": workspace_id, "u": str(target[0]), "r": body.role},
+    )
+    audit(db, user, "member.set", "workspace", workspace_id, role=body.role)
+    db.commit()
+    return {"ok": True}
+
+
+# ------------------------------------------------------------ briefings
+
 @app.post("/api/v1/briefings")
-def create_briefing(body: BriefingIn, db: Session = Depends(get_db)):
-    _require_dev_auth()
+def create_briefing(body: BriefingIn, db: Session = Depends(get_db), user: User = Depends(_member)):
+    from grounded.skill_registry import SkillRegistryError, resolve_skill
+
+    try:
+        contract, _crafts = resolve_skill(body.skill_id)
+    except SkillRegistryError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    project_id = body.project_id or _default_project(db, user)
+    project = db.execute(text("SELECT workspace_id FROM projects WHERE id = :id"), {"id": project_id}).first()
+    if project is None or ROLE_RANK.get(role_in_workspace(db, user, str(project[0])) or "", -1) < ROLE_RANK["editor"]:
+        raise HTTPException(404, "project not found")
     briefing_id = new_id()
-    project_id = body.project_id or _ensure_dev_project(db)
     db.execute(
         text(
             """
             INSERT INTO briefings
               (id, project_id, title, state, skill_id, skill_version, language, created_by)
             VALUES
-              (:id, :project_id, :title, 'draft', :skill_id, '1.0.0', 'en', :user_id)
+              (:id, :project_id, :title, 'draft', :skill_id, :skill_version, 'en', :user_id)
             """
         ),
         {
@@ -117,102 +242,132 @@ def create_briefing(body: BriefingIn, db: Session = Depends(get_db)):
             "project_id": project_id,
             "title": body.title,
             "skill_id": body.skill_id,
-            "user_id": _dev_user(db),
+            "skill_version": contract.version,
+            "user_id": user.id,
         },
     )
+    audit(db, user, "briefing.create", "briefing", briefing_id, skill_id=body.skill_id)
     db.commit()
-    return {"id": briefing_id, "state": "draft", "skill_id": body.skill_id}
+    return {"id": briefing_id, "state": "draft", "skill_id": body.skill_id, "skill_version": contract.version}
+
+
+def _default_project(db: Session, user: User) -> str:
+    row = db.execute(
+        text(
+            """
+            SELECT p.id FROM projects p JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+            WHERE wm.user_id = :u AND wm.role IN ('admin', 'owner', 'editor')
+            ORDER BY p.created_at LIMIT 1
+            """
+        ),
+        {"u": user.id},
+    ).first()
+    if row is None:
+        raise HTTPException(403, "no project you can edit; ask a workspace admin")
+    return str(row[0])
 
 
 @app.get("/api/v1/briefings")
-def list_briefings(db: Session = Depends(get_db)):
+def list_briefings(db: Session = Depends(get_db), user: User = Depends(_member)):
     rows = db.execute(
         text(
             """
-            SELECT id, title, state, skill_id, created_at
-            FROM briefings
-            ORDER BY created_at DESC
-            LIMIT 20
+            SELECT b.id, b.title, b.state, b.skill_id, b.skill_version, b.created_at
+            FROM briefings b
+            JOIN projects p ON p.id = b.project_id
+            JOIN workspace_members wm ON wm.workspace_id = p.workspace_id AND wm.user_id = :u
+            ORDER BY b.created_at DESC
+            LIMIT 50
             """
-        )
+        ),
+        {"u": user.id},
     ).mappings().all()
     return {"briefings": [_public_row(row) for row in rows]}
 
 
 @app.get("/api/v1/briefings/{briefing_id}")
-def get_briefing(briefing_id: str, db: Session = Depends(get_db)):
+def get_briefing(briefing_id: str, db: Session = Depends(get_db), user: User = Depends(_member)):
+    authorize_briefing(db, user, briefing_id)
     row = db.execute(
-        text("SELECT id, title, state, skill_id, language FROM briefings WHERE id = :id"),
+        text("SELECT id, title, state, skill_id, skill_version, language FROM briefings WHERE id = :id"),
         {"id": briefing_id},
     ).mappings().first()
-    if not row:
-        raise HTTPException(404, "briefing not found")
     assets = db.execute(
         text(
-            "SELECT id, kind, filename, mime, bytes FROM source_assets WHERE briefing_id = :id"
+            "SELECT id, kind::text AS kind, filename, mime, bytes, sha256, detected_format, parent_asset_id, "
+            "duration_ms, normalized_at FROM source_assets WHERE briefing_id = :id ORDER BY created_at"
         ),
         {"id": briefing_id},
     ).mappings().all()
-    return {**dict(row), "assets": [dict(a) for a in assets]}
+    return {**_public_row(row), "assets": [_public_row(a) for a in assets]}
 
 
 @app.post("/api/v1/briefings/{briefing_id}/assets")
 async def upload_asset(
     briefing_id: str,
-    kind: str = Form("recording"),
+    request: Request,
+    kind: str = Form("attachment"),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    user: User = Depends(_member),
 ):
-    exists = db.execute(
-        text("SELECT 1 FROM briefings WHERE id = :id"), {"id": briefing_id}
-    ).first()
-    if not exists:
-        raise HTTPException(404, "briefing not found")
-    _require_dev_auth()
+    authorize_briefing(db, user, briefing_id, need="editor")
     if not is_allowed_kind(kind):
         raise HTTPException(400, f"unknown asset kind {kind}")
-    try:
-        data = await read_limited(file.read)
-    except UploadTooLarge as exc:
-        raise HTTPException(413, str(exc))
-    digest = hashlib.sha256(data).hexdigest()
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES + 1024 * 1024:
+        raise HTTPException(413, f"asset exceeds {MAX_UPLOAD_BYTES} bytes")
     asset_id = new_id()
     safe_name = sanitize_filename(file.filename)
     key = f"briefings/{briefing_id}/{asset_id}/{safe_name}"
-    put_bytes(key, data, file.content_type or "application/octet-stream")
+    mime = file.content_type or "application/octet-stream"
+    reader = HashingReader(file.file)
+    try:
+        put_fileobj(key, reader, mime)
+    except UploadTooLarge as exc:
+        delete_object(key)
+        raise HTTPException(413, str(exc)) from None
+    try:
+        from grounded.sources import SourceError, detect
+
+        detected = detect(safe_name, reader.head)
+    except SourceError as exc:
+        delete_object(key)
+        raise HTTPException(415, "; ".join(exc.errors)) from None
+    # The declared kind is a hint; the stored kind is what the bytes are.
+    stored_kind = detected.kind
     db.execute(
         text(
             """
             INSERT INTO source_assets
-              (id, briefing_id, kind, filename, mime, bytes, sha256, minio_key)
+              (id, briefing_id, kind, filename, mime, bytes, sha256, minio_key, detected_format)
             VALUES
-              (:id, :briefing_id, CAST(:kind AS asset_kind), :filename, :mime, :bytes, :sha256, :key)
+              (:id, :briefing_id, CAST(:kind AS asset_kind), :filename, :mime, :bytes, :sha256, :key, :fmt)
             """
         ),
         {
             "id": asset_id,
             "briefing_id": briefing_id,
-            "kind": kind,
+            "kind": stored_kind,
             "filename": safe_name,
-            "mime": file.content_type or "application/octet-stream",
-            "bytes": len(data),
-            "sha256": digest,
+            "mime": mime,
+            "bytes": reader.size,
+            "sha256": reader.sha256,
             "key": key,
+            "fmt": detected.format,
         },
     )
+    audit(db, user, "asset.upload", "source_asset", asset_id, bytes=reader.size, kind=stored_kind)
     db.commit()
-    return {"id": asset_id, "sha256": digest, "bytes": len(data)}
+    logsafe.log_event("asset.upload", briefing_id=briefing_id, asset_id=asset_id, bytes=reader.size, asset_kind=stored_kind)
+    return {"id": asset_id, "sha256": reader.sha256, "bytes": reader.size, "kind": stored_kind, "format": detected.format}
 
 
 @app.post("/api/v1/briefings/{briefing_id}/jobs")
-def start_job(briefing_id: str, body: JobIn, db: Session = Depends(get_db)):
-    _require_dev_auth()
-    allowed = {"ingest", "transcribe", "compile", "qa", "render", "index"}
-    if body.type not in allowed:
+def start_job(briefing_id: str, body: JobIn, db: Session = Depends(get_db), user: User = Depends(_member)):
+    authorize_briefing(db, user, briefing_id, need="editor")
+    if body.type not in JOB_TYPES:
         raise HTTPException(400, f"unknown job type {body.type}")
-    exists = db.execute(text("SELECT 1 FROM briefings WHERE id = :id"), {"id": briefing_id}).first()
-    if not exists:
-        raise HTTPException(404, "briefing not found")
     job_id = new_id()
     db.execute(
         text(
@@ -223,28 +378,35 @@ def start_job(briefing_id: str, body: JobIn, db: Session = Depends(get_db)):
         ),
         {"id": job_id, "briefing_id": briefing_id, "type": body.type},
     )
+    audit(db, user, "job.start", "job", job_id, type=body.type)
     db.commit()
     enqueue(job_id, body.type, briefing_id)
     return {"id": job_id, "type": body.type, "state": "queued"}
 
 
 @app.get("/api/v1/jobs/{job_id}")
-def get_job(job_id: str, db: Session = Depends(get_db)):
+def get_job(job_id: str, db: Session = Depends(get_db), user: User = Depends(_member)):
+    try:
+        uuid.UUID(job_id)
+    except ValueError:
+        raise HTTPException(404, "job not found") from None
     row = db.execute(
-        text("SELECT id, briefing_id, type, state, error FROM jobs WHERE id = :id"),
+        text("SELECT id, briefing_id, type::text AS type, state::text AS state, error, model_ids FROM jobs WHERE id = :id"),
         {"id": job_id},
     ).mappings().first()
     if not row:
         raise HTTPException(404, "job not found")
-    return dict(row)
+    authorize_briefing(db, user, str(row["briefing_id"]))
+    return _public_row(row)
 
 
 @app.get("/api/v1/briefings/{briefing_id}/script")
-def get_script(briefing_id: str, db: Session = Depends(get_db)):
+def get_script(briefing_id: str, db: Session = Depends(get_db), user: User = Depends(_member)):
+    authorize_briefing(db, user, briefing_id)
     row = db.execute(
         text(
             """
-            SELECT id, version, accepted, raw_json
+            SELECT id, version, accepted, raw_json, skill_id, skill_version, provenance, providers
             FROM script_versions
             WHERE briefing_id = :id
             ORDER BY version DESC
@@ -255,48 +417,105 @@ def get_script(briefing_id: str, db: Session = Depends(get_db)):
     ).mappings().first()
     if not row:
         raise HTTPException(404, "no script yet")
-    return dict(row)
+    citations = db.execute(
+        text(
+            """
+            SELECT sb.ord, c.id, c.kind::text AS kind, c.asset_id, c.sheet, c.addr, c.block_id, c.page,
+                   c.t_start_ms, c.t_end_ms
+            FROM script_beats sb JOIN citations c ON c.beat_id = sb.id
+            WHERE sb.script_id = :sid ORDER BY sb.ord
+            """
+        ),
+        {"sid": row["id"]},
+    ).mappings().all()
+    return {**_public_row(row), "citations": [_public_row(c) for c in citations]}
 
 
 @app.post("/api/v1/briefings/{briefing_id}/script/accept")
-def accept_script(briefing_id: str, db: Session = Depends(get_db)):
-    _require_dev_auth()
+def accept_script(briefing_id: str, db: Session = Depends(get_db), user: User = Depends(_member)):
+    authorize_briefing(db, user, briefing_id, need="editor")
     result = db.execute(
         text(
             """
             UPDATE script_versions
-            SET accepted = true
+            SET accepted = true, accepted_by = :u
             WHERE briefing_id = :id
               AND version = (
                 SELECT MAX(version) FROM script_versions WHERE briefing_id = :id
               )
             """
         ),
-        {"id": briefing_id},
+        {"id": briefing_id, "u": user.id},
     )
     if result.rowcount == 0:
         raise HTTPException(404, "no script to accept")
-    db.execute(
-        text("UPDATE briefings SET state = 'review' WHERE id = :id"),
-        {"id": briefing_id},
-    )
+    db.execute(text("UPDATE briefings SET state = 'review' WHERE id = :id"), {"id": briefing_id})
+    audit(db, user, "script.accept", "briefing", briefing_id)
     db.commit()
     return {"accepted": True}
 
 
-@app.get("/api/v1/assets/{asset_id}/content")
-def asset_content(asset_id: str, db: Session = Depends(get_db)):
+@app.get("/api/v1/briefings/{briefing_id}/sources")
+def list_sources(briefing_id: str, db: Session = Depends(get_db), user: User = Depends(_member)):
+    """Normalized source rows so every citation can be audited."""
+    authorize_briefing(db, user, briefing_id)
+    cells = db.execute(
+        text(
+            "SELECT wc.asset_id, wc.sheet, wc.addr, wc.value_num, wc.value_text, wc.formula "
+            "FROM workbook_cells wc JOIN source_assets sa ON sa.id = wc.asset_id "
+            "WHERE sa.briefing_id = :id ORDER BY wc.sheet, wc.addr LIMIT 5000"
+        ),
+        {"id": briefing_id},
+    ).mappings().all()
+    blocks = db.execute(
+        text(
+            "SELECT db.asset_id, db.block_id, db.page, db.heading_path, db.text, db.extractor "
+            "FROM document_blocks db JOIN source_assets sa ON sa.id = db.asset_id "
+            "WHERE sa.briefing_id = :id ORDER BY db.asset_id, db.ord LIMIT 5000"
+        ),
+        {"id": briefing_id},
+    ).mappings().all()
+    segments = db.execute(
+        text(
+            "SELECT ts.asset_id, ts.t_start_ms, ts.t_end_ms, ts.text "
+            "FROM transcript_segments ts JOIN source_assets sa ON sa.id = ts.asset_id "
+            "WHERE sa.briefing_id = :id ORDER BY ts.t_start_ms LIMIT 5000"
+        ),
+        {"id": briefing_id},
+    ).mappings().all()
+    return {
+        "cells": [_public_row(r) for r in cells],
+        "blocks": [_public_row(r) for r in blocks],
+        "segments": [_public_row(r) for r in segments],
+    }
+
+
+def _asset_key(db: Session, user: User, table: str, object_id: str) -> str:
+    try:
+        uuid.UUID(object_id)
+    except ValueError:
+        raise HTTPException(404, "not found") from None
     row = db.execute(
-        text("SELECT minio_key FROM source_assets WHERE id = :id"),
-        {"id": asset_id},
+        text(f"SELECT minio_key, briefing_id FROM {table} WHERE id = :id"),  # table is a literal below
+        {"id": object_id},
     ).first()
     if not row:
-        raise HTTPException(404, "asset not found")
-    return {"url": signed_url(row[0])}
+        raise HTTPException(404, "not found")
+    authorize_briefing(db, user, str(row[1]))
+    return str(row[0])
+
+
+@app.get("/api/v1/assets/{asset_id}/content")
+def asset_content(asset_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(_member)):
+    key = _asset_key(db, user, "source_assets", asset_id)
+    audit(db, user, "asset.read", "source_asset", asset_id)
+    db.commit()
+    return _stream(key, request, disposition="attachment")
 
 
 @app.get("/api/v1/briefings/{briefing_id}/artifacts")
-def list_artifacts(briefing_id: str, db: Session = Depends(get_db)):
+def list_artifacts(briefing_id: str, db: Session = Depends(get_db), user: User = Depends(_member)):
+    authorize_briefing(db, user, briefing_id)
     rows = db.execute(
         text(
             "SELECT id, kind, bytes, sha256, created_at FROM artifacts "
@@ -304,48 +523,62 @@ def list_artifacts(briefing_id: str, db: Session = Depends(get_db)):
         ),
         {"id": briefing_id},
     ).mappings().all()
-    return {"artifacts": [dict(row) for row in rows]}
+    return {"artifacts": [_public_row(row) for row in rows]}
 
 
 @app.get("/api/v1/artifacts/{artifact_id}/content")
-def artifact_content(artifact_id: str, db: Session = Depends(get_db)):
-    row = db.execute(
-        text("SELECT minio_key FROM artifacts WHERE id = :id"),
-        {"id": artifact_id},
-    ).first()
-    if not row:
-        raise HTTPException(404, "artifact not found")
-    return {"url": signed_url(row[0])}
+def artifact_content(artifact_id: str, db: Session = Depends(get_db), user: User = Depends(_member)):
+    _asset_key(db, user, "artifacts", artifact_id)
+    return {"url": f"/api/v1/artifacts/{artifact_id}/file"}
 
 
 @app.get("/api/v1/artifacts/{artifact_id}/file")
-def artifact_file(artifact_id: str, request: Request, db: Session = Depends(get_db)):
+def artifact_file(artifact_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(_member)):
     """Stream an artifact from this origin so the film can seek and the deck can be framed."""
-    row = db.execute(
-        text("SELECT minio_key FROM artifacts WHERE id = :id"),
-        {"id": artifact_id},
-    ).first()
-    if not row:
-        raise HTTPException(404, "artifact not found")
+    key = _asset_key(db, user, "artifacts", artifact_id)
+    return _stream(key, request, disposition="inline")
+
+
+def _stream(key: str, request: Request, disposition: str) -> Response:
     try:
-        data = read_bytes(row[0])
+        size = object_size(key)
     except FileNotFoundError:
-        raise HTTPException(404, "artifact missing")
+        raise HTTPException(404, "object missing") from None
     try:
-        status, body, headers = slice_body(data, request.headers.get("range"))
+        span = parse_range(request.headers.get("range"), size)
     except ValueError:
-        return Response(
-            status_code=416,
-            headers={"Content-Range": f"bytes */{len(data)}", "Accept-Ranges": "bytes"},
-        )
-    headers["Content-Type"] = content_type(row[0])
-    headers["Content-Disposition"] = "inline"
-    headers["Cache-Control"] = "private, max-age=300"
-    return Response(content=body, status_code=status, headers=headers)
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"})
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Type": content_type(key),
+        "Content-Disposition": disposition,
+        "Cache-Control": "private, no-store",
+    }
+    if span is None:
+        body = open_range(key)
+        headers["Content-Length"] = str(size)
+        status = 200
+    else:
+        start, end = span
+        body = open_range(key, start, end)
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        headers["Content-Length"] = str(end - start + 1)
+        status = 206
+
+    def chunks():
+        try:
+            for chunk in iter(lambda: body.read(1024 * 1024), b""):
+                yield chunk
+        finally:
+            close = getattr(body, "close", None)
+            if close:
+                close()
+
+    return StreamingResponse(chunks(), status_code=status, headers=headers)
 
 
 @app.get("/api/v1/skills")
-def list_skills():
+def list_skills(user: User = Depends(_member)):
     from grounded.catalog import CatalogError, load_catalog, load_crafts
 
     try:
@@ -353,23 +586,24 @@ def list_skills():
         crafts = load_crafts()
     except CatalogError as exc:
         raise HTTPException(500, str(exc)) from exc
-    return {"offline": True, "skills": skills, "crafts": crafts}
+    return {"offline": POLICY.offline, "deployment_mode": POLICY.mode, "skills": skills, "crafts": crafts}
 
 
 @app.post("/api/v1/help/chat")
-def help_chat(body: ChatIn):
-    from grounded.chat import answer_grounded
+def help_chat(body: ChatIn, user: User = Depends(_member)):
+    from grounded.chat import answer_help
 
     question = (body.question or "").strip()
     if not question:
         raise HTTPException(400, "question is required")
-    return answer_grounded({"beats": []}, question[:2000])
+    return answer_help(question)
 
 
 @app.post("/api/v1/briefings/{briefing_id}/chat")
-def briefing_chat(briefing_id: str, body: ChatIn, db: Session = Depends(get_db)):
+def briefing_chat(briefing_id: str, body: ChatIn, db: Session = Depends(get_db), user: User = Depends(_member)):
     from grounded.chat import answer_grounded
 
+    authorize_briefing(db, user, briefing_id)
     question = (body.question or "").strip()
     if not question:
         raise HTTPException(400, "question is required")
@@ -383,10 +617,37 @@ def briefing_chat(briefing_id: str, body: ChatIn, db: Session = Depends(get_db))
         ),
         {"id": briefing_id},
     ).first()
-    if not row:
-        raise HTTPException(404, "no script yet")
-    raw = row[0] if isinstance(row[0], dict) else json.loads(row[0])
-    return answer_grounded(raw, question[:2000], briefing_id=briefing_id, db=db)
+    raw = {"beats": []}
+    if row:
+        raw = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+    result = answer_grounded(raw, question, briefing_id=briefing_id, db=db)
+    _record_chat(db, user, briefing_id, question, result)
+    return result
+
+
+def _record_chat(db: Session, user: User, briefing_id: str, question: str, result: dict) -> None:
+    session = db.execute(
+        text("SELECT id FROM chat_sessions WHERE briefing_id = :b AND user_id = :u ORDER BY created_at DESC LIMIT 1"),
+        {"b": briefing_id, "u": user.id},
+    ).first()
+    session_id = str(session[0]) if session else str(uuid.uuid4())
+    if not session:
+        db.execute(
+            text("INSERT INTO chat_sessions (id, briefing_id, user_id) VALUES (:id, :b, :u)"),
+            {"id": session_id, "b": briefing_id, "u": user.id},
+        )
+    for role, message, cites, provider in (
+        ("user", question, [], None),
+        ("assistant", result["text"], result.get("citations") or [], result.get("provider")),
+    ):
+        db.execute(
+            text(
+                "INSERT INTO chat_messages (id, session_id, role, text, citations, provider) "
+                "VALUES (:id, :s, :role, :text, CAST(:cites AS jsonb), :provider)"
+            ),
+            {"id": str(uuid.uuid4()), "s": session_id, "role": role, "text": message, "cites": json.dumps(cites), "provider": provider},
+        )
+    db.commit()
 
 
 def _public_row(row) -> dict:
@@ -401,43 +662,5 @@ def _public_row(row) -> dict:
     return item
 
 
-def _dev_user(db: Session) -> str:
-    row = db.execute(text("SELECT id FROM users LIMIT 1")).first()
-    if row:
-        return str(row[0])
-    user_id = str(uuid.uuid4())
-    db.execute(
-        text(
-            """
-            INSERT INTO users (id, idp_sub, email, display_name)
-            VALUES (:id, 'dev', 'dev@internal', 'Dev User')
-            """
-        ),
-        {"id": user_id},
-    )
-    db.commit()
-    return user_id
-
-
-def _ensure_dev_project(db: Session) -> str:
-    row = db.execute(text("SELECT id FROM projects LIMIT 1")).first()
-    if row:
-        return str(row[0])
-    ws_id = str(uuid.uuid4())
-    project_id = str(uuid.uuid4())
-    user_id = _dev_user(db)
-    db.execute(
-        text("INSERT INTO workspaces (id, name, slug) VALUES (:id, 'Internal', 'internal')"),
-        {"id": ws_id},
-    )
-    db.execute(
-        text(
-            """
-            INSERT INTO projects (id, workspace_id, name, created_by)
-            VALUES (:id, :ws, 'Pilot', :user_id)
-            """
-        ),
-        {"id": project_id, "ws": ws_id, "user_id": user_id},
-    )
-    db.commit()
-    return project_id
+if os.environ.get("GROUNDED_PRINT_POSTURE") == "1":  # pragma: no cover - operator aid
+    print(json.dumps({"mode": POLICY.mode, "auth": AUTH_MODE, "providers": SELECTION.describe()}))

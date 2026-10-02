@@ -204,8 +204,6 @@ def _revise_polish(
     cells: dict[tuple[str, str], Any] | None,
     client: Any,
 ) -> dict[str, Any]:
-    from .bedrock import BedrockError, from_env
-
     target: int | None = None
     words = instruction.lower().split()
     if "beat" in words:
@@ -217,28 +215,37 @@ def _revise_polish(
             return _refuse(script, f'Refused "{instruction}": there is no beat {target}.')
     candidate = copy.deepcopy(script)
     notes: list[str] = []
-    chat = from_env(client)
+    model, why_not = _polish_model(client)
     locks = surface_locks(pack) if pack is not None else {}
+    used: dict[str, str] = {}
     for beat in candidate.get("beats") or []:
         if target is not None and beat.get("ord") != target:
             continue
-        if beat.get("layout") == "cover":
+        if beat.get("layout") in {"cover", "source-range"}:
             continue
         old_text = str(beat.get("text") or "")
+        if model is None:
+            notes.append(f"beat {beat.get('ord')} kept verbatim ({why_not}).")
+            continue
         wanted = sorted(_beat_locks(beat, locks))
         try:
             import json as _json
 
-            raw = chat.complete(_POLISH_SYSTEM, _polish_prompt(beat, old_text, wanted))
+            from .providers.base import ProviderError
+
+            result = model.complete(_POLISH_SYSTEM, _polish_prompt(beat, old_text, wanted))
+            raw = result.text if hasattr(result, "text") else str(result)
             new_text = str(_json.loads(raw).get("text") or "").strip()
-        except (BedrockError, ValueError, AttributeError):
-            notes.append(f"beat {beat.get('ord')} kept verbatim (Claude unavailable).")
+            used = {"provider": getattr(model, "name", "model"), "model_id": getattr(model, "model_id", "")}
+        except (ProviderError, ValueError, AttributeError, TypeError):
+            notes.append(f"beat {beat.get('ord')} kept verbatim (model unavailable).")
             continue
         problem = _polish_problem(beat, old_text, new_text, wanted)
         if problem:
             notes.append(f"beat {beat.get('ord')} kept verbatim ({problem}).")
             continue
         beat["text"] = new_text
+        beat.setdefault("assist", []).append({"op": "polish", **used, "source_text": old_text})
         notes.append(f"beat {beat.get('ord')} polished.")
     errors = _gates(candidate, pack, cells)
     if errors:
@@ -257,21 +264,36 @@ def _revise_polish(
     return {"script": candidate, "notes": notes, "applied": changed}
 
 
+def _polish_model(client: Any) -> tuple[Any, str]:
+    """The selected polish model, or (None, reason). Never a fallback."""
+    from .providers.base import ProviderError
+
+    try:
+        if client is not None:
+            if hasattr(client, "converse"):
+                # A Bedrock runtime client: still goes through the Bedrock
+                # provider, so offline mode and model allowlists apply.
+                from .providers.bedrock import BedrockInference
+
+                return BedrockInference(client=client), ""
+            return client, ""
+        from .providers.registry import inference_provider
+
+        model = inference_provider("polish")
+    except ProviderError as exc:
+        return None, f"provider refused: {exc}"
+    if model is None:
+        return None, "no polish model selected"
+    return model, ""
+
+
 def _polish_problem(
     beat: dict[str, Any], old_text: str, new_text: str, wanted: list[str]
 ) -> str | None:
-    if not new_text:
-        return "empty reply"
-    old_numbers = sorted(parse_numbers(old_text))
-    new_numbers = sorted(parse_numbers(new_text))
-    if len(new_numbers) != len(old_numbers) or any(
-        not close(new, old) for new, old in zip(new_numbers, old_numbers)
-    ):
-        return "numbers drifted"
-    for surface in wanted:
-        if surface not in new_text:
-            return f"dropped surface {surface!r}"
-    return None
+    from .grounding import check_rewrite
+
+    verdict = check_rewrite(old_text, new_text, wanted)
+    return None if verdict.ok else verdict.reason
 
 
 def _gates(
@@ -346,6 +368,12 @@ def _shown_texts(beat: dict[str, Any]) -> list[str]:
         for value in row.values():
             if isinstance(value, str):
                 strings.append(value)
+    visual = beat.get("visual") or {}
+    for row in visual.get("rows") or []:
+        for cell in row:
+            value = cell.get("display") if isinstance(cell, dict) else None
+            if isinstance(value, str):
+                strings.append(value)
     return strings
 
 
@@ -408,6 +436,7 @@ def _coverage_note(pack: dict[str, Any]) -> str:
 _POLISH_SYSTEM = (
     "You are a veteran broadcast writer polishing one briefing beat. "
     "Reply with a single JSON object: {\"text\": <polished beat>}. "
+    "Never add causes, risks, recommendations, forecasts or names. "
     "Keep every number EXACTLY as written in the locked list — same digits, "
     "same units, same order of magnitude. Never add, round, drop, or reorder "
     "numbers or facts. Same meaning, broadcast polish, one or two sentences."

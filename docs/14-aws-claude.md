@@ -1,69 +1,26 @@
-# 14 — AWS internal runbook (EC2 + Bedrock Claude)
+# 14 — aws-private profile (Amazon Bedrock / Nova)
 
-Closed. Chat, transcription, and narration do not call Bedrock, Transcribe, or Polly. The default is `EGRESS_MODE=offline`. See [17](17-offline-egress.md). The steps below are a historical pilot record. They are not the offline profile.
+The earlier "Bedrock + Claude pilot" path that sent prompts to a public
+regional endpoint is gone. Amazon Bedrock and Amazon Nova are supported as
+first-class providers **inside the `aws-private` deployment profile only**,
+behind explicit allowlists and private AWS networking.
 
-Single EC2 box running `infra/compose.yaml`: Postgres (pgvector), Redis,
-MinIO, API, worker. The live path is local retrieval, faster-whisper, and Piper or Kokoro. The paragraphs under the decision record describe the retired AWS pilot.
+* Profile, provider selection, grounding rules and every egress layer:
+  [18 — Deployment profiles](18-deployment-profiles.md).
+* Reference infrastructure (VPC without IGW/NAT, VPC endpoints with
+  model-restricted policies, least-privilege task role, SSE-KMS bucket,
+  encrypted logs): `infra/aws/terraform/`.
 
-## Decision record
+What stays the same in aws-private mode:
 
-The original spec (`docs/00-vision.md`, `docs/06-privacy-and-security.md`)
-required fully in-house models with no data egress. The business decision
-is to run on AWS with Claude instead:
+* Transcription is local faster-whisper and narration is local Piper/Kokoro.
+  Amazon Transcribe and Amazon Polly cannot be approved by configuration.
+* Every factual statement still needs a valid citation. Nova output is a
+  draft that passes deterministic grounding, recomputation and QA gates, or
+  it does not ship.
+* No static AWS access keys. Credentials come from the task/instance role.
 
-- Prompts (briefing text, chat questions) are processed by Bedrock Claude,
-  Transcribe, and Polly **inside the chosen AWS region**. This is egress
-  from our VPC to AWS managed services — accepted for the pilot.
-- Sources at rest stay in our VPC (EBS volumes, MinIO on instance disk).
-- Bedrock does not train on prompts. No Anthropic API key is used.
-- Revisit air-gap (vLLM/Ollama/faster-whisper) if a customer or regulator
-  requires it. The deterministic engine, QA gates, and `stub` providers
-  keep working with no AWS at all.
-
-## Prerequisites (AWS console, one time)
-
-1. EC2 instance (Ubuntu 22.04, t3.large minimum, 100 GB EBS), Docker + plugin.
-2. S3 bucket for Transcribe staging, e.g. `grounded-transcribe-staging`.
-3. Instance profile with this inline policy (replace region/account/bucket):
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {"Effect": "Allow", "Action": ["bedrock:InvokeModel"], "Resource": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0"},
-    {"Effect": "Allow", "Action": ["transcribe:StartTranscriptionJob", "transcribe:GetTranscriptionJob"], "Resource": "*"},
-    {"Effect": "Allow", "Action": ["s3:PutObject", "s3:GetObject"], "Resource": "arn:aws:s3:::grounded-transcribe-staging/*"},
-    {"Effect": "Allow", "Action": ["polly:SynthesizeSpeech"], "Resource": "*"}
-  ]
-}
-```
-
-4. Bedrock console → Model access → enable the Claude model in your region.
-5. Security group: inbound 8000/tcp from the company VPN/CIDR only. No public ingress.
-
-## Deploy
-
-```bash
-cp .env.example .env   # then set real passwords + TRANS_S3_BUCKET
-# enable providers:
-#   TRANS_PROVIDER=transcribe
-#   NARRATION_PROVIDER=polly
-docker compose -f infra/compose.yaml up -d --build
-curl http://127.0.0.1:8000/health
-```
-
-## End-to-end check
-
-1. `POST /api/v1/briefings` → id
-2. `POST /api/v1/briefings/{id}/assets` (kind=recording|workbook|document)
-3. `POST /api/v1/briefings/{id}/jobs` type `transcribe` → `succeeded`
-4. `.../jobs` type `compile` → `GET .../script` returns beats with citations
-5. `POST .../jobs` type `render` → deck.html + walkthrough.mp4 + voiceover.mp3 (when Polly on)
-6. `POST /api/v1/briefings/{id}/chat` → grounded answer; refuses off-briefing questions
-
-## Before real business data
-
-- Set `DEV_BYPASS_AUTH=false` only after SSO is wired (API currently fails
-  closed with 501 — that is intentional, not a bug).
-- Rotate all `change-me` secrets; keep `../.env` off git (already ignored).
-- Snapshot EBS; set Postgres/MinIO retention per `docs/06-privacy-and-security.md`.
+Before using real data: confirm with your security team that the AWS
+account, region, Bedrock models, endpoint policies and data classification
+are approved for that data. Using AWS does not by itself make a workload
+approved for confidential information.

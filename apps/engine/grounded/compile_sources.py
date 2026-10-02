@@ -7,10 +7,10 @@ from typing import Any
 
 from .compile_deck import CompileError, cell_index
 from .director import direct
-from .ingest import IngestError, parse_docx
+from .ingest import IngestError, parse_docx, parse_pdf
 
 _RECORDING_SKILLS = frozenset({"product-walkthrough", "sop-training", "feature-delta"})
-_DOCUMENT_SKILLS = frozenset({"leadership-brief", "launch-announcement"})
+_DOCUMENT_SKILLS = frozenset({"leadership-brief", "launch-announcement", "executive-business-review"})
 DOCUMENT_SKILLS = _DOCUMENT_SKILLS
 
 
@@ -62,6 +62,11 @@ def _approve(
 
 
 def _load_document(data: bytes) -> dict[str, Any]:
+    if data.startswith(b"%PDF"):
+        try:
+            return parse_pdf(data)
+        except IngestError as exc:
+            raise CompileError([str(exc)]) from exc
     if data[:2] == b"PK":
         try:
             return parse_docx(data)
@@ -69,7 +74,7 @@ def _load_document(data: bytes) -> dict[str, Any]:
             raise CompileError([str(exc)]) from exc
     if data.lstrip()[:1] in {b"{", b"["}:
         return _json_object(data, "document")
-    raise CompileError(["document must be a .docx or a JSON block pack"])
+    raise CompileError(["document must be a PDF, DOCX, or JSON block pack"])
 
 
 def _json_object(data: bytes, label: str) -> dict[str, Any]:

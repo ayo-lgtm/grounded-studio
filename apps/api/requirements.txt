@@ -7,4 +7,3 @@ python-multipart==0.0.20
 boto3==1.35.90
 redis==5.2.1
 python-jose[cryptography]==3.3.0
-httpx==0.28.1

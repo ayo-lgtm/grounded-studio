@@ -6,6 +6,7 @@ DECK_LAYOUTS = frozenset(
         "big-number",
         "versus-target",
         "movers",
+        "source-range",
         "risk",
         "ask",
         "statement",
@@ -17,11 +18,14 @@ RECORDING_LAYOUTS = frozenset({"step", "statement"})
 
 ALL_LAYOUTS = DECK_LAYOUTS | RECORDING_LAYOUTS
 
-_WBR = frozenset({"cover", "big-number", "versus-target", "movers", "risk", "ask"})
+_WBR = frozenset({"cover", "big-number", "versus-target", "movers", "source-range", "risk", "ask"})
 _STEP = frozenset({"step"})
 
 SKILL_LAYOUTS = {
     "weekly-ops-review": _WBR,
+    "finance-wbr": _WBR,
+    "half-year-business-review": _WBR,
+    "executive-business-review": _WBR | {"statement"},
     "wbr-kpi-spine": _WBR,
     "wbr-executive": _WBR,
     "wbr-ops-deep-dive": _WBR,
@@ -67,6 +71,9 @@ SLIDESHOW_SKILLS = frozenset(
 
 SKILL_RENDERER = {
     "weekly-ops-review": "deck",
+    "finance-wbr": "deck",
+    "half-year-business-review": "deck",
+    "executive-business-review": "deck",
     "wbr-kpi-spine": "deck",
     "wbr-executive": "deck",
     "wbr-ops-deep-dive": "deck",
