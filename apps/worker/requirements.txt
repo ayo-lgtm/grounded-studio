@@ -5,3 +5,5 @@ boto3==1.35.90
 redis==5.2.1
 httpx==0.28.1
 faster-whisper==1.1.1
+# Imported by faster-whisper 1.1.1. Not pulled in by huggingface-hub.
+requests==2.34.2
