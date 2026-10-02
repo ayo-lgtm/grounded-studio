@@ -1,5 +1,6 @@
 # craft: data-narration
 version: 1.0.0
+offline: true
 used_by: weekly-ops-review, finance-wbr, half-year-business-review, executive-business-review
 
 job: Turn accepted metrics and variances into concise spoken business language without overstating what the data proves.
