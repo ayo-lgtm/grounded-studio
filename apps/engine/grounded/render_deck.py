@@ -78,6 +78,7 @@ def _slide(script: dict[str, Any], beat: dict[str, Any], index: int, total: int)
         "big-number": _big_number,
         "versus-target": _versus,
         "movers": _movers,
+        "source-range": _source_range,
         "risk": _sentence,
         "ask": _sentence,
         "statement": _sentence,
@@ -148,6 +149,31 @@ def _movers(script: dict[str, Any], beat: dict[str, Any]) -> str:
         "</tr></thead><tbody>"
         + "".join(rows)
         + "</tbody></table>"
+    )
+
+
+
+def _source_range(script: dict[str, Any], beat: dict[str, Any]) -> str:
+    visual = beat.get("visual") or {}
+    grid = visual.get("rows") or []
+    rendered_rows = []
+    for row_index, row in enumerate(grid):
+        cells = []
+        tag = "th" if row_index == 0 else "td"
+        for cell in row:
+            display = html.escape(str(cell.get("display") or ""))
+            addr = html.escape(str(cell.get("addr") or ""))
+            cells.append(f'<{tag} class="source-cell" title="{addr}">{display}</{tag}>')
+        rendered_rows.append("<tr>" + "".join(cells) + "</tr>")
+    range_label = html.escape(str(visual.get("range") or ""))
+    source = html.escape(str((beat.get("citations") or [{}])[0].get("sheet") or "Workbook"))
+    return (
+        '<p class="eyebrow">Source data</p>'
+        f"<h1>{html.escape(beat['text'])}</h1>"
+        f'<p class="lead">{source} {range_label}</p>'
+        '<div class="source-table"><table><tbody>'
+        + "".join(rendered_rows)
+        + "</tbody></table></div>"
     )
 
 
