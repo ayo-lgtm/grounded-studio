@@ -37,6 +37,16 @@ def assert_internal_url(url: str, label: str = "endpoint") -> str:
 
 
 def assert_private_runtime(*urls: tuple[str, str] | str) -> None:
+    if public_egress_disabled():
+        external_hosts = [
+            name
+            for name in ("RAILWAY_ENVIRONMENT", "RAILWAY_PROJECT_ID", "VERCEL", "RENDER", "FLY_APP_NAME")
+            if os.environ.get(name)
+        ]
+        if external_hosts:
+            raise EgressPolicyError(
+                "private mode refuses third-party hosted runtime: " + ", ".join(external_hosts)
+            )
     for item in urls:
         if isinstance(item, tuple):
             label, url = item
