@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 
 _TOKEN = re.compile(
-    r"\\(?[+\\u2212-]?\\s*[$€£¥]?\\s*\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?\\s*[MmKk]?%?\\)?"
-    r"|\\(?[+\\u2212-]?\\s*[$€£¥]?\\s*\\d+(?:\\.\\d+)?\\s*[MmKk]?%?\\)?"
+    r"\(?[+\u2212-]?\s*[$€£¥]?\s*\d{1,3}(?:,\d{3})+(?:\.\d+)?\s*[MmKk]?%?\)?"
+    r"|\(?[+\u2212-]?\s*[$€£¥]?\s*\d+(?:\.\d+)?\s*[MmKk]?%?\)?"
 )
 
 
@@ -68,7 +68,7 @@ def _normalize(token: str) -> float:
         .replace("€", "")
         .replace("£", "")
         .replace("¥", "")
-        .replace("\\u2212", "-")
+        .replace("\u2212", "-")
     )
     sign = -1.0 if accounting_negative else 1.0
     if text and text[0] in "+-":
