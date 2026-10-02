@@ -204,7 +204,7 @@ def _revise_polish(
     cells: dict[tuple[str, str], Any] | None,
     client: Any,
 ) -> dict[str, Any]:
-    from .bedrock import BedrockError, from_env
+    from .local_model import LocalModel, LocalModelError
 
     target: int | None = None
     words = instruction.lower().split()
@@ -217,7 +217,7 @@ def _revise_polish(
             return _refuse(script, f'Refused "{instruction}": there is no beat {target}.')
     candidate = copy.deepcopy(script)
     notes: list[str] = []
-    chat = from_env(client)
+    chat = client if client is not None else LocalModel()
     locks = surface_locks(pack) if pack is not None else {}
     for beat in candidate.get("beats") or []:
         if target is not None and beat.get("ord") != target:
@@ -231,7 +231,7 @@ def _revise_polish(
 
             raw = chat.complete(_POLISH_SYSTEM, _polish_prompt(beat, old_text, wanted))
             new_text = str(_json.loads(raw).get("text") or "").strip()
-        except (BedrockError, ValueError, AttributeError):
+        except (LocalModelError, ValueError, AttributeError):
             notes.append(f"beat {beat.get('ord')} kept verbatim (Claude unavailable).")
             continue
         problem = _polish_problem(beat, old_text, new_text, wanted)
