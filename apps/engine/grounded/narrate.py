@@ -1,31 +1,25 @@
-"""Voiceover narration via Amazon Polly.
+"""Local-only voiceover narration using Piper.
 
-Beats are synthesized in order and concatenated to one MP3 per briefing.
-Narration reads the accepted script aloud — it never adds words.
+Grounded Studio never sends narration text to a cloud TTS provider.
 """
 
 from __future__ import annotations
 
-import os
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 MAX_CHUNK_CHARS = 3000
 
-VOICES = {"en": "Joanna", "fr": "Celine", "de": "Vicki", "es": "Lucia"}
 
-
-class PollyError(Exception):
+class NarrationError(RuntimeError):
     pass
 
 
-class PollyClient(Protocol):
-    def synthesize_speech(self, **kwargs: Any) -> dict[str, Any]: ...
-
-
 def split_chunks(text: str, limit: int = MAX_CHUNK_CHARS) -> list[str]:
-    """Split narration text into Polly-sized chunks on sentence boundaries."""
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
     chunks: list[str] = []
     current = ""
@@ -46,56 +40,55 @@ def split_chunks(text: str, limit: int = MAX_CHUNK_CHARS) -> list[str]:
     return chunks
 
 
-def voice_for(language: str) -> str:
-    return VOICES.get((language or "en").lower(), "Joanna")
-
-
-def _client_or_create(client: PollyClient | None, region: str) -> PollyClient:
-    if client is not None:
-        return client
-    try:
-        import boto3  # lazy: engine stays dependency-light for tests
-    except ImportError as exc:
-        raise PollyError("boto3 is not installed") from exc
-    try:
-        return boto3.client("polly", region_name=region)  # type: ignore[return-value]
-    except Exception as exc:
-        raise PollyError(f"cannot create polly client: {exc}") from exc
-
-
-def synthesize(text: str, voice_id: str, region: str, client: PollyClient | None = None) -> bytes:
-    polly = _client_or_create(client, region)
-    audio = b""
-    try:
-        for chunk in split_chunks(text):
-            response = polly.synthesize_speech(
-                Text=chunk, OutputFormat="mp3", VoiceId=voice_id
-            )
-            stream = response.get("AudioStream")
-            data = stream.read() if stream is not None else b""
-            if not data:
-                raise PollyError("polly returned empty audio")
-            audio += data
-    except PollyError:
-        raise
-    except Exception as exc:
-        raise PollyError(f"polly synthesize failed: {exc}") from exc
-    return audio
-
-
 def narrate_script(
     script: dict[str, Any],
     out_path: Path,
-    region: str | None = None,
-    client: PollyClient | None = None,
+    *,
+    piper_bin: str = "piper",
+    model_path: str = "",
 ) -> Path:
-    """Write the briefing voiceover MP3. Raises PollyError on failure."""
-    region = region or os.environ.get("AWS_REGION", "us-east-1")
-    voice_id = os.environ.get("NARRATION_VOICE") or voice_for(script.get("language", "en"))
+    """Write narration with a pre-provisioned local Piper voice model."""
     texts = [str(beat.get("text") or "") for beat in script.get("beats") or []]
     full = "\n".join(text for text in texts if text.strip())
     if not full:
-        raise PollyError("script has no narration text")
+        raise NarrationError("script has no narration text")
+
+    model = Path(model_path)
+    if not model_path or not model.exists():
+        raise NarrationError("PIPER_MODEL_PATH must point to a pre-provisioned local voice model")
+    binary = shutil.which(piper_bin) or (piper_bin if Path(piper_bin).exists() else None)
+    if not binary:
+        raise NarrationError("local Piper binary is not installed")
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(synthesize(full, voice_id, region, client))
+    with tempfile.TemporaryDirectory() as tmp:
+        wav = Path(tmp) / "voiceover.wav"
+        try:
+            proc = subprocess.run(
+                [str(binary), "--model", str(model), "--output_file", str(wav)],
+                input=full,
+                text=True,
+                capture_output=True,
+                timeout=600,
+            )
+        except Exception as exc:
+            raise NarrationError(f"local Piper failed: {exc}") from exc
+        if proc.returncode != 0 or not wav.exists():
+            tail = (proc.stderr or proc.stdout or "").strip()[-800:]
+            raise NarrationError(f"local Piper failed: {tail or 'no audio produced'}")
+
+        if out_path.suffix.lower() == ".wav":
+            shutil.copyfile(wav, out_path)
+            return out_path
+
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            raise NarrationError("ffmpeg is required to convert local Piper WAV to MP3")
+        proc = subprocess.run(
+            [ffmpeg, "-y", "-i", str(wav), "-codec:a", "libmp3lame", str(out_path)],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0 or not out_path.exists():
+            raise NarrationError("ffmpeg failed to encode local narration")
     return out_path
