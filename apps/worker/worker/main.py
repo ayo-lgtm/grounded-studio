@@ -55,8 +55,10 @@ def handle(payload: dict) -> None:
             run_qa(db, briefing_id)
         elif job_type == "render":
             render(db, briefing_id)
-        elif job_type in {"ingest", "index"}:
-            # Phase 1 no-op: assets are stored inline by the API; embeddings ship later.
+        elif job_type in {"ingest", "parse"}:
+            ingest_sources(db, briefing_id)
+        elif job_type == "index":
+            # Embedding/indexing remains a separate future job. Parsing is real now.
             pass
         else:
             raise ValueError(f"unsupported job {job_type}")
@@ -76,6 +78,111 @@ def handle(payload: dict) -> None:
         db.commit()
     finally:
         db.close()
+
+
+def ingest_sources(db, briefing_id: str) -> None:
+    """Normalize workbook/document assets into the source tables."""
+    from grounded.ingest import IngestError, parse_docx, parse_pdf
+    from grounded.ingest_workbook import extract_workbook_cells
+
+    assets = db.execute(
+        text(
+            """
+            SELECT id, kind, minio_key, filename
+            FROM source_assets
+            WHERE briefing_id = :id AND kind IN ('workbook', 'document')
+            ORDER BY created_at
+            """
+        ),
+        {"id": briefing_id},
+    ).all()
+
+    for asset_id, kind, key, filename in assets:
+        data = _bytes_for_asset(key, filename)
+        if kind == "workbook":
+            cells = extract_workbook_cells(data)
+            db.execute(text("DELETE FROM workbook_cells WHERE asset_id = :id"), {"id": asset_id})
+            for cell in cells:
+                db.execute(
+                    text(
+                        """
+                        INSERT INTO workbook_cells
+                          (id, asset_id, sheet, addr, value_num, value_text, fmt)
+                        VALUES
+                          (:id, :asset_id, :sheet, :addr, :value_num, :value_text, :fmt)
+                        """
+                    ),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "asset_id": asset_id,
+                        **cell,
+                    },
+                )
+            continue
+
+        try:
+            if data.startswith(b"%PDF"):
+                doc = parse_pdf(data)
+            elif data[:2] == b"PK":
+                doc = parse_docx(data)
+            elif data.lstrip()[:1] in {b"{", b"["}:
+                parsed = json.loads(data)
+                if not isinstance(parsed, dict):
+                    raise RuntimeError("document JSON must be an object")
+                doc = parsed
+            else:
+                raise RuntimeError("document must be PDF, DOCX, or JSON")
+        except (IngestError, json.JSONDecodeError) as exc:
+            raise RuntimeError(str(exc)) from exc
+
+        db.execute(text("DELETE FROM document_blocks WHERE asset_id = :id"), {"id": asset_id})
+        seen: set[str] = set()
+        title = str(doc.get("title") or "").strip()
+        title_block = str(doc.get("title_block") or "p1")
+        if title:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO document_blocks
+                      (id, asset_id, block_id, page, text)
+                    VALUES (:id, :asset_id, :block_id, :page, :text)
+                    """
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "asset_id": asset_id,
+                    "block_id": title_block,
+                    "page": 1,
+                    "text": title,
+                },
+            )
+            seen.add(title_block)
+        for block in doc.get("blocks") or []:
+            block_id = str(block.get("id") or "")
+            block_text = str(block.get("text") or "").strip()
+            if not block_id or not block_text or block_id in seen:
+                continue
+            db.execute(
+                text(
+                    """
+                    INSERT INTO document_blocks
+                      (id, asset_id, block_id, heading_path, page, text)
+                    VALUES
+                      (:id, :asset_id, :block_id, :heading_path, :page, :text)
+                    """
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "asset_id": asset_id,
+                    "block_id": block_id,
+                    "heading_path": block.get("heading_path"),
+                    "page": block.get("page"),
+                    "text": block_text,
+                },
+            )
+            seen.add(block_id)
+    db.commit()
+
 
 
 def transcribe(db, briefing_id: str) -> None:
@@ -295,6 +402,21 @@ def _persist_artifacts(db, briefing_id: str, out: Path) -> None:
                 "bytes": size,
             },
         )
+
+def _bytes_for_asset(key: str, filename: str | None) -> bytes:
+    import tempfile
+
+    suffix = Path(filename or "").suffix
+    handle = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    handle.close()
+    dest = Path(handle.name)
+    try:
+        _download_asset(key, dest)
+        return dest.read_bytes()
+    finally:
+        dest.unlink(missing_ok=True)
+
+
 
 def _latest_bytes(db, briefing_id: str, kind: str) -> bytes | None:
     row = db.execute(
