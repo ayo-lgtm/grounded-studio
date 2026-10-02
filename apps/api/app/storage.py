@@ -1,9 +1,11 @@
+from grounded.network_policy import assert_internal_url
 from .settings import settings
 
 
 def _client(client=None):
     if client is not None:
         return client
+    assert_internal_url(settings.minio_endpoint, "MINIO_ENDPOINT")
     try:
         import boto3
         from botocore.client import Config
