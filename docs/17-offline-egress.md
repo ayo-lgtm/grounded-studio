@@ -1,34 +1,37 @@
-# 17 — Offline egress
+# 17 — Offline profile and `/health`
 
-Generation stays on the box. `/health` reports the mode it is actually in.
+`GROUNDED_DEPLOYMENT_MODE=offline` is the default. Full design, both
+profiles and every enforcement layer: [18](18-deployment-profiles.md).
 
-| `egress` | Meaning |
+`GET /health` (unauthenticated, content-free) reports the posture the
+process is actually running with:
+
+| field | values |
 |---|---|
-| `offline` | Chat is local retrieval. Narration is Piper or Kokoro. Transcription is faster-whisper. Object storage host is private. |
-| `blocked` | `EGRESS_MODE` is offline (the default) and `MINIO_ENDPOINT` is a public host. Uploads and downloads raise. Nothing is sent. |
-| `aws-in-region` | Operator set `EGRESS_MODE=aws-in-region`. Object storage may be public. Chat, TTS, and ASR still do not call Bedrock, Polly, or Transcribe. |
+| `deployment_mode` | `offline` or `aws-private` |
+| `egress` | the mode, or `blocked` when the object store is public/unapproved, or `misconfigured` when the policy cannot load (e.g. the retired `aws-in-region`) |
+| `object_store` | `private`, `aws-private-s3`, or `public-refused` |
+| `providers` | the explicit selection per workload (inference, embedding, transcription, tts, image_text, models) |
+| `chat` | `retrieval` or `retrieval+validated-phrasing` |
+| `auth` | `oidc`, `trusted-header`, `dev` (development only) or `unconfigured` |
 
-`chat`, `narration`, and `transcription` in the health body stay `retrieval` and `local` in every mode.
+`ok` is false when the database is down, storage is refused, providers are
+misconfigured, or auth is unconfigured.
 
-## Allowed private endpoints
+## Offline guarantees
 
-- Postgres and Redis on localhost, a single-label docker name, RFC1918, or `*.railway.internal`
-- MinIO (S3 API) on the same kind of host. Railway service `minio`, volume `miniodata`, endpoint `http://minio.railway.internal:9000`
-- Optional `MODEL_BASE_URL` only when the host is private (Ollama or vLLM on the network). Empty means retrieval only. A public host is ignored and the retrieved passage is returned verbatim.
-
-## Refused
-
-Public generative and media APIs are not called, including when credentials exist in the environment:
-
-- Amazon Bedrock and any Anthropic cloud model
-- Amazon Polly, ElevenLabs, and any other hosted TTS
-- Amazon Transcribe and any hosted ASR
-- OpenAI, Google, Veo, Runway, HeyGen, Slides.com, Google Slides, Higgsfield, Scenario
-- Hosted Swagger assets (the `/docs` page is a local HTML file)
-- Public object storage in offline mode, including Tigris (`*.storageapi.dev`), AWS S3, and `*.railway.app` buckets
-
-`TRANS_PROVIDER` and `NARRATION_PROVIDER` accept `local`. Values `stub`, `transcribe`, `polly`, `aws`, and `elevenlabs` fail the job.
-
-## Weights
-
-The Railway image bakes Piper (`en_US-lessac-medium`) and faster-whisper `base` at build time. Runtime sets `HF_HUB_OFFLINE=1`. A missing weight fails the job. It does not download.
+* No AWS endpoint, Bedrock model or public host is reachable through the
+  policy; the socket guard blocks any public IP; compose puts API, worker
+  and data services on an `internal: true` network.
+* Chat is retrieval over the briefing's own sources. An internal
+  OpenAI-compatible server (vLLM/Ollama) may phrase answers only when
+  `GROUNDED_INFERENCE_PROVIDER=local` and `GROUNDED_ASSIST_FEATURES`
+  includes `chat`; its output passes the grounding gate or is discarded.
+* Transcription is faster-whisper with `local_files_only` and
+  `HF_HUB_OFFLINE=1`; narration is Piper/Kokoro. Missing weights fail the
+  job; nothing downloads at runtime.
+* The worker image bakes Piper `en_US-lessac-medium` and whisper `base` at
+  build time (`infra/install-local-models.sh`, which accepts an internal
+  mirror via `PIPER_URL`, `VOICE_BASE`, `WHISPER_LOCAL_DIR`).
+* `/docs` is a local HTML page; Swagger/ReDoc/OpenAPI are disabled; the
+  room UI and decks load no remote scripts, styles or fonts.

@@ -2,6 +2,20 @@
 
 Audit date: 2026-10-02
 
+## Resolution status (follow-up, same day)
+
+| Finding | Status |
+|---|---|
+| Skill library not runtime-addressable | **Resolved.** `skill_registry` + `contracts` read `## Runtime` (inputs, layouts, slide caps, check ids); unknown check ids fail closed; skill/craft versions + SHA-256 are pinned in every script and persisted in `script_versions.provenance`. |
+| XLSX/CSV not natively parsed | **Resolved** for values, displayed formats, formulas (cached or locally evaluated simple formulas), risks/asks sheets, row-level text and source ranges. Merged cells, named ranges and hidden-sheet policy remain open. |
+| PDF ingestion absent | **Resolved** for text-layer PDFs (page-grounded blocks). Scanned PDFs fail closed; OCR for PDFs is not implemented. |
+| Parse/index path incomplete | **Resolved.** `ingest` persists cells, rows, blocks (with page/slide/heading), segments; `index` embeds the briefing's own sources. |
+| Citations only in JSON | **Resolved.** `citations` (with asset, page, range) and `claims` (value, formula, operands) rows are written per beat and verified against normalized rows before a script ships. |
+| Auth not production-ready | **Resolved.** OIDC or SSO-proxy auth, workspace RBAC, fail-closed when unset; dev bypass only in `GROUNDED_ENV=development`. |
+| Synthetic fallback could masquerade as evidence | **Resolved.** JSON workbook packs cannot ship through the worker; chat no longer answers from product docs. |
+
+The original findings follow for the record.
+
 ## Executive finding
 
 Grounded Studio has a credible grounded-rendering core, but the implementation is not yet aligned with the product promise that the Director can choose and invoke a rich library of production skills.

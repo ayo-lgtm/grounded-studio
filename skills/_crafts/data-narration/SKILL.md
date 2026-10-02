@@ -1,5 +1,5 @@
 # craft: data-narration
-version: 1.0.0
+version: 1.1.0
 offline: true
 used_by: weekly-ops-review, finance-wbr, half-year-business-review, executive-business-review
 
@@ -46,3 +46,10 @@ Do not say:
 - every comparison names or visually establishes the comparator;
 - every interpretation has evidence distinct from the arithmetic;
 - narration does not omit an adverse variance solely for brevity.
+
+## Runtime
+Machine-read by `grounded.contracts`.
+runtime_checks:
+  - numbers-cited
+  - no-unsourced-causal
+  - model-text-reviewed

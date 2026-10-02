@@ -1,5 +1,5 @@
 # skill: finance-wbr
-version: 1.0.0
+version: 1.1.0
 offline: true
 job: Finance-grade weekly business review from an ordinary workbook, with exact lineage and source-first visuals.
 
@@ -92,3 +92,26 @@ Refuse or flag:
 - cell_audit.csv
 - calculation_audit.csv
 - data_quality.json
+
+## Runtime
+Machine-read by `grounded.contracts`; unknown check ids fail the compile.
+runtime_compiler: workbook-deck
+runtime_accepts:
+  - workbook
+  - document
+  - presentation
+runtime_requires_any:
+  - workbook
+runtime_layouts:
+  - cover
+  - big-number
+  - versus-target
+  - movers
+  - source-range
+  - risk
+  - ask
+runtime_max_slides: 24
+runtime_checks:
+  - citations-present
+  - numbers-cited
+  - period-cited

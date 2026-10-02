@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import re
 
+# A quantity is not glued to letters: "7Q", "Q3", "FY24", "SKU-12A" are
+# identifiers, not displayed numbers. Model rewrites lock identifiers
+# separately (grounding.identifiers), so they cannot drift either.
 _TOKEN = re.compile(
+    r"(?<![A-Za-z0-9_.])(?:"
     r"\(?[+\u2212-]?\s*[$€£¥]?\s*\d{1,3}(?:,\d{3})+(?:\.\d+)?\s*[MmKk]?%?\)?"
     r"|\(?[+\u2212-]?\s*[$€£¥]?\s*\d+(?:\.\d+)?\s*[MmKk]?%?\)?"
+    r")(?![A-Za-z0-9_])"
 )
 
 

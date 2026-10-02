@@ -9,3 +9,4 @@ data/
 models/
 out/
 .DS_Store
+*.whl

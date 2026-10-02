@@ -6,11 +6,11 @@ Application skeleton is in `apps/api` and `apps/worker`.
 
 1. Create a briefing
 2. Upload a recording into MinIO
-3. Enqueue `transcribe` (AWS Transcribe when `TRANS_PROVIDER=transcribe`, else a placeholder segment)
+3. Enqueue `transcribe` (local faster-whisper with preloaded weights; cloud ASR is not available)
 4. Enqueue `compile` — a transcript becomes a walkthrough, a workbook JSON pack becomes the weekly deck, and a `.docx` becomes a leadership or launch deck. The director gates run before the script is saved.
 5. Citation QA fails closed if a beat has no span
 6. Fetch and accept the script
-7. Enqueue `render` — cuts the real recording (or renders the deck) and adds Polly narration when enabled
+7. Enqueue `render` — cuts the real recording (or renders the deck), writes cell/calculation audits, and adds local Piper narration when `GROUNDED_TTS_PROVIDER=local`
 8. Rendered files persist as artifacts (video, captions, deck, storyboard) and download via the artifacts endpoints
 
 The engine also runs without Docker. From the repo root:
@@ -42,7 +42,7 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/briefings \
 
 ## Next
 
-- SSO, then `DEV_BYPASS_AUTH=false`
+- `AUTH_MODE=oidc` or `trusted-header` (auth fails closed when unset; dev bypass only in `GROUNDED_ENV=development`)
 - workbook/document ingest through the API (Phase 3/4)
 - EBS snapshots and retention before real business data
 - review UI beyond the studio page (accept flow in the browser)

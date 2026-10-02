@@ -1,5 +1,5 @@
 # craft: source-visualization
-version: 1.0.0
+version: 1.1.0
 offline: true
 used_by: weekly-ops-review, finance-wbr, half-year-business-review, executive-business-review, leadership-brief
 
@@ -42,3 +42,8 @@ Highlight only the cited sentence/paragraph.
 - no neighboring confidential data is unnecessarily exposed;
 - screenshot resolution is readable at final output size;
 - source view and narration are synchronized.
+
+## Runtime
+Machine-read by `grounded.contracts`.
+runtime_checks:
+  - source-range-cited

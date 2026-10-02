@@ -6,34 +6,89 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
-  private-runtime:
+  privacy-and-unit:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install runtime dependencies
-        run: pip install -r apps/api/requirements.txt -r apps/worker/requirements.txt
-      - name: Reject cloud egress code paths
+      - name: Install dependencies
+        run: pip install -r apps/api/requirements.txt -r apps/worker/requirements.txt -r requirements-test.txt
+      - name: Reject retired cloud code paths (fast grep)
         run: |
           set -e
-          ! grep -R -nE 'bedrock-runtime|start_transcription_job|synthesize_speech|TranscriptFileUri|amazonaws\.com' apps/api apps/engine apps/worker
-      - name: Run engine tests
+          ! grep -R -nE 'start_transcription_job|synthesize_speech|TranscriptFileUri|api\.openai\.com|api\.anthropic\.com|elevenlabs\.io|storageapi\.dev|cdn\.jsdelivr' apps --include='*.py' --include='*.html' --exclude-dir=tests
+          ! grep -R -nE 'GROUND_ALLOW_PUBLIC_EGRESS\s*[:=]\s*"?(1|true|yes)' . --include='*.yml' --include='*.yaml' --include='*.env*' --include='Dockerfile'
+          ! grep -R -nE 'DEV_BYPASS_AUTH\s*[:=]\s*"?true' . --include='*.yml' --include='*.yaml' --include='Dockerfile' --include='.env.example'
+      - name: Lint (pyflakes, undefined names fail)
+        run: python -m pyflakes apps tests | grep -vE "imported but unused|is assigned to but never used|nonlocal" | tee /tmp/flakes.txt; test ! -s /tmp/flakes.txt
+      - name: Privacy, policy, provider and grounding tests (engine)
         env:
           PYTHONPATH: apps/engine
           GROUNDED_SKILLS_ROOT: skills
         run: python -m unittest discover -s apps/engine/tests -p "test_*.py" -v
-      - name: Run worker tests
+      - name: Worker tests
         env:
           PYTHONPATH: apps/worker:apps/engine
           GROUNDED_SKILLS_ROOT: skills
         run: python -m unittest discover -s apps/worker/tests -p "test_*.py" -v
-      - name: Run API tests
+      - name: API tests
         env:
           PYTHONPATH: apps/api:apps/engine
           GROUNDED_SKILLS_ROOT: skills
-          DEV_BYPASS_AUTH: "true"
         run: python -m unittest discover -s apps/api/tests -p "test_*.py" -v
+
+  end-to-end:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: grounded
+          POSTGRES_PASSWORD: grounded
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U grounded"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Install dependencies
+        run: pip install -r apps/api/requirements.txt -r apps/worker/requirements.txt -r requirements-test.txt
+      - name: End-to-end on a private loopback stack (synthetic data)
+        env:
+          E2E_DATABASE_URL: postgresql+psycopg://grounded:grounded@127.0.0.1:5432/postgres
+          E2E_REDIS_URL: redis://127.0.0.1:6379/0
+        run: python -m unittest tests/e2e/test_private_stack.py -v
+
+  terraform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+      - name: Validate aws-private reference infrastructure
+        working-directory: infra/aws/terraform
+        run: |
+          terraform fmt -check
+          terraform init -backend=false -input=false
+          terraform validate

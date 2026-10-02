@@ -1,5 +1,5 @@
 # skill: half-year-business-review
-version: 1.0.0
+version: 1.1.0
 offline: true
 job: Explain H1/H2 or first-half performance from one or more workbooks and supporting documents without losing period comparability.
 
@@ -64,3 +64,27 @@ Use trends for monthly/quarterly evolution, source-range snapshots for reconcili
 - source snapshots
 - metric lineage audit
 - calculation audit
+
+## Runtime
+Machine-read by `grounded.contracts`; unknown check ids fail the compile.
+runtime_compiler: workbook-deck
+runtime_accepts:
+  - workbook
+  - document
+  - presentation
+  - image
+runtime_requires_any:
+  - workbook
+runtime_layouts:
+  - cover
+  - big-number
+  - versus-target
+  - movers
+  - source-range
+  - risk
+  - ask
+runtime_max_slides: 30
+runtime_checks:
+  - citations-present
+  - numbers-cited
+  - period-cited

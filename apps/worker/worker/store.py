@@ -33,7 +33,7 @@ def download_file(
     client: S3Client | None = None,
 ) -> Path:
     """Download one store object to dest. Returns dest."""
-    client = _store_client(endpoint, access_key, secret_key, region, client)
+    client = _store_client(endpoint, access_key, secret_key, region, client, bucket)
     try:
         body = client.get_object(Bucket=bucket, Key=key)["Body"]
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -59,6 +59,10 @@ ARTIFACT_KINDS = {
     "mix.json": "mix",
     "placement.json": "placement",
     "quality.json": "quality",
+    "cell_audit.csv": "cell-audit",
+    "calculation_audit.csv": "calculation-audit",
+    "data_quality.json": "data-quality",
+    "provenance.json": "provenance",
 }
 
 CONTENT_TYPES = {
@@ -69,6 +73,7 @@ CONTENT_TYPES = {
     ".md": "text/markdown",
     ".mp3": "audio/mpeg",
     ".wav": "audio/wav",
+    ".csv": "text/csv",
 }
 
 
@@ -93,10 +98,12 @@ def upload_file(
     client: S3Client | None = None,
 ) -> int:
     """Upload one file, streaming from disk. Returns bytes written."""
-    s3 = _store_client(endpoint, access_key, secret_key, region, client)
+    from grounded.objectstore import write_args
+
+    s3 = _store_client(endpoint, access_key, secret_key, region, client, bucket)
     try:
         with open(src, "rb") as handle:
-            s3.put_object(Bucket=bucket, Key=key, Body=handle, ContentType=content_type)
+            s3.put_object(Bucket=bucket, Key=key, Body=handle, **write_args(content_type))
     except Exception as exc:
         raise StoreError(f"store upload failed: {exc}") from exc
     return src.stat().st_size
@@ -108,26 +115,11 @@ def _store_client(
     secret_key: str,
     region: str,
     client: S3Client | None,
+    bucket: str = "",
 ):
-    from grounded.egress import EgressError, assert_object_store
+    from grounded.objectstore import StoreConfig, StoreError as _Err, client as _client
 
     try:
-        assert_object_store(endpoint)
-    except EgressError as exc:
+        return _client(StoreConfig(endpoint, bucket, access_key, secret_key, region), client)
+    except _Err as exc:
         raise StoreError(str(exc)) from exc
-    if client is not None:
-        return client
-    try:
-        import boto3
-    except ImportError as exc:
-        raise StoreError("boto3 is not installed") from exc
-    try:
-        return boto3.client(
-            "s3",
-            endpoint_url=endpoint,
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
-            region_name=region,
-        )
-    except Exception as exc:
-        raise StoreError(f"cannot create store client: {exc}") from exc

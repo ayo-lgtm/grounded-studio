@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .layouts import SKILL_RENDERER
-from .numbers import format_pct, format_points, format_value
+from .numbers import format_points, format_value
 
 
 class CompileError(Exception):
@@ -51,7 +51,10 @@ def compile_workbook(pack: dict[str, Any], skill_id: str = "weekly-ops-review") 
     title = pack["title"]
     period = pack.get("period") or {}
     cover_slots: dict[str, Any] = {}
-    cover_claims: list[dict[str, Any]] = []
+    cover_claims: list[dict[str, Any]] = [
+        {"value": number, "sheet": title["sheet"], "addr": title["addr"], "in_text": True}
+        for number in _numbers_in(str(title.get("text") or ""))
+    ]
     cover_cites = [_workbook(title["sheet"], title["addr"])]
     if period.get("text"):
         cover_slots["period"] = period["text"]
@@ -204,7 +207,7 @@ def _kpi_beat(kpi: dict[str, Any]) -> dict[str, Any]:
                 "sheet": sheet,
                 "addr": addr,
                 "derived": True,
-                "formula": "(actual - target) * 100",
+                "formula": "abs(actual - target) * 100",
                 "operands": [
                     {"sheet": sheet, "addr": addr},
                     {"sheet": target_sheet, "addr": target_addr},
@@ -225,7 +228,7 @@ def _kpi_beat(kpi: dict[str, Any]) -> dict[str, Any]:
                 "sheet": sheet,
                 "addr": addr,
                 "derived": True,
-                "formula": "actual - target",
+                "formula": "abs(actual - target)",
                 "operands": [
                     {"sheet": sheet, "addr": addr},
                     {"sheet": target_sheet, "addr": target_addr},
@@ -268,7 +271,19 @@ def _movers_beat(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 delta_text = format_value(abs(lead_delta), unit)
                 claim_value = abs(lead_delta)
             text = f"Largest selected move is {lead['label']}, {word} {delta_text} from the prior period."
-            claims.append({"value": claim_value, "sheet": lead["sheet"], "addr": lead["addr"], "derived": True})
+            claims.append(
+                {
+                    "value": claim_value,
+                    "sheet": lead["sheet"],
+                    "addr": lead["addr"],
+                    "derived": True,
+                    "formula": "abs(actual - prior) * 100" if unit == "pct" else "abs(actual - prior)",
+                    "operands": [
+                        {"sheet": lead["sheet"], "addr": lead["addr"]},
+                        {"sheet": lead["sheet"], "addr": lead["prior_addr"]},
+                    ],
+                }
+            )
 
     table = []
     cites = []
@@ -379,6 +394,12 @@ def _text_claims(text: str, block_id: str) -> list[dict[str, Any]]:
     from .numbers import parse_numbers
 
     return [{"value": number, "block_id": block_id, "in_text": True, "source": text} for number in parse_numbers(text)]
+
+
+def _numbers_in(text: str) -> list[float]:
+    from .numbers import parse_numbers
+
+    return [int(n) if float(n).is_integer() else n for n in parse_numbers(text)]
 
 
 def _integers_in(text: str) -> list[int]:

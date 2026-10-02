@@ -26,23 +26,68 @@ def parse_workbook(data: bytes) -> dict[str, Any]:
         if not isinstance(parsed, dict):
             raise CompileError(["workbook JSON must be an object"])
         return parsed
+    if data[:8] == _OLE_MAGIC:
+        raise CompileError(["legacy .xls workbooks are not supported; save the file as .xlsx"])
     if data[:2] == b"PK":
         return _parse_xlsx(data)
     return _parse_csv(data)
 
 
+_OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
+
+class _Book:
+    """Formula and cached-value views of one XLSX, with local evaluation."""
+
+    def __init__(self, data: bytes) -> None:
+        try:
+            from openpyxl import load_workbook
+        except ImportError as exc:
+            raise CompileError(["XLSX support requires openpyxl"]) from exc
+        source = io.BytesIO(data)
+        try:
+            self.formulas = load_workbook(source, data_only=False, read_only=False)
+            source.seek(0)
+            self.values = load_workbook(source, data_only=True, read_only=False)
+        except Exception as exc:  # noqa: BLE001
+            raise CompileError([f"workbook is not a readable XLSX file ({type(exc).__name__})"]) from None
+        self.evaluated: set[tuple[str, str]] = set()
+
+    def _authored(self, sheet: str, addr: str) -> Any:
+        try:
+            return self.formulas[sheet][addr].value
+        except KeyError:
+            return None
+
+    def value(self, sheet: str, addr: str) -> Any:
+        """Cached value, else a locally evaluated simple formula, else None."""
+        try:
+            cached = self.values[sheet][addr].value
+        except KeyError:
+            return None
+        if cached is not None:
+            return cached
+        authored = self._authored(sheet, addr)
+        if isinstance(authored, str) and authored.startswith("="):
+            from .formula import evaluate
+
+            result = evaluate(authored, sheet, self._lookup)
+            if result is not None:
+                self.evaluated.add((sheet, addr))
+            return result
+        return authored
+
+    def _lookup(self, sheet: str, addr: str) -> Any:
+        try:
+            cached = self.values[sheet][addr].value
+        except KeyError:
+            return None
+        return cached if cached is not None else self._authored(sheet, addr)
+
+
 def _parse_xlsx(data: bytes) -> dict[str, Any]:
-    try:
-        from openpyxl import load_workbook
-    except ImportError as exc:
-        raise CompileError(["XLSX support requires openpyxl"]) from exc
-    source = io.BytesIO(data)
-    try:
-        formulas = load_workbook(source, data_only=False, read_only=False)
-        source.seek(0)
-        values = load_workbook(source, data_only=True, read_only=False)
-    except Exception as exc:
-        raise CompileError([f"workbook is not a readable XLSX file ({exc})"]) from exc
+    book = _Book(data)
+    formulas = book.formulas
 
     kpis: list[dict[str, Any]] = []
     movers: list[dict[str, Any]] = []
@@ -56,7 +101,7 @@ def _parse_xlsx(data: bytes) -> dict[str, Any]:
     source_ranges: list[dict[str, Any]] = []
 
     for ws in formulas.worksheets:
-        value_ws = values[ws.title]
+        value_ws = _ValueSheet(book, ws.title)
         table = _find_table(ws)
         if table is None:
             continue
@@ -80,7 +125,10 @@ def _parse_xlsx(data: bytes) -> dict[str, Any]:
             actual_formula = ws.cell(row, actual_col)
             actual_value = value_ws.cell(row, actual_col).value
             if actual_formula.data_type == "f" and actual_value is None:
-                warnings.append(f"{ws.title}!{actual_formula.coordinate} has a formula with no cached value")
+                warnings.append(
+                    f"{ws.title}!{actual_formula.coordinate} has a formula with no cached value "
+                    "that cannot be evaluated locally; it is not cited"
+                )
                 continue
             actual_num = _number(actual_value)
             if actual_num is None:
@@ -154,16 +202,88 @@ def _parse_xlsx(data: bytes) -> dict[str, Any]:
             ]
         )
     first = kpis[0]
+    risks, asks = _xlsx_notes(formulas, book)
+    for sheet, addr in sorted(book.evaluated):
+        warnings.append(f"{sheet}!{addr} had no cached value; evaluated locally from its formula")
     return {
         "title": {"sheet": title_sheet or first["sheet"], "addr": title_addr or first["addr"], "text": title or "Business Review"},
         "period": {"sheet": period_sheet or first["sheet"], "addr": period_addr or first["addr"], "text": period} if period else {},
         "kpis": kpis,
         "movers": movers,
-        "risks": [],
-        "asks": [],
+        "risks": risks,
+        "asks": asks,
         "data_quality": warnings,
         "source_ranges": source_ranges,
     }
+
+
+class _ValueSheet:
+    """``value_ws.cell(r, c).value`` and ``value_ws[addr].value`` over a _Book."""
+
+    def __init__(self, book: "_Book", title: str) -> None:
+        self.book = book
+        self.title = title
+
+    def cell(self, row: int, column: int):
+        return _Value(self.book.value(self.title, _a1(row, column)))
+
+    def __getitem__(self, addr: str):
+        return _Value(self.book.value(self.title, addr))
+
+
+class _Value:
+    def __init__(self, value: Any) -> None:
+        self.value = value
+
+
+_RISK_HEADERS = {"risk", "risks", "key risk", "key risks"}
+_ASK_HEADERS = {"ask", "asks", "decision", "decisions", "asks/decisions", "decision needed", "request"}
+_PRIMARY_HEADERS = {"primary", "lead", "headline"}
+
+
+def _xlsx_notes(formulas, book: "_Book") -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Sourced risks and asks: a column headed Risk(s)/Ask(s), or a sheet named so."""
+    risks: list[dict[str, Any]] = []
+    asks: list[dict[str, Any]] = []
+    for ws in formulas.worksheets:
+        name = _norm(ws.title)
+        sheet_kind = "risk" if name in _RISK_HEADERS else "ask" if name in _ASK_HEADERS else None
+        header_row = None
+        columns: dict[int, str] = {}
+        primary_col = None
+        for row in range(1, min(ws.max_row, 30) + 1):
+            for col in range(1, ws.max_column + 1):
+                header = _norm(ws.cell(row, col).value)
+                if header in _RISK_HEADERS:
+                    columns[col] = "risk"
+                elif header in _ASK_HEADERS:
+                    columns[col] = "ask"
+                elif header in _PRIMARY_HEADERS:
+                    primary_col = col
+            if columns:
+                header_row = row
+                break
+        if not columns and sheet_kind:
+            header_row, columns = 1, {1: sheet_kind}
+            if _norm(ws.cell(1, 1).value) not in _RISK_HEADERS | _ASK_HEADERS:
+                header_row = 0
+        if not columns:
+            continue
+        for col, kind in columns.items():
+            for row in range(header_row + 1, ws.max_row + 1):
+                value = book.value(ws.title, _a1(row, col))
+                if value is None or isinstance(value, (int, float)):
+                    continue
+                text = str(value).strip()
+                if not text:
+                    continue
+                note = {"sheet": ws.title, "addr": _a1(row, col), "text": text}
+                if primary_col is not None:
+                    flag = _norm(book.value(ws.title, _a1(row, primary_col)))
+                    if flag in {"y", "yes", "true", "1", "x", "primary"}:
+                        note["primary"] = True
+                (risks if kind == "risk" else asks).append(note)
+    return risks, asks
 
 
 def _parse_csv(data: bytes) -> dict[str, Any]:
@@ -392,22 +512,16 @@ def _a1(row: int, col: int) -> str:
 
 def extract_workbook_cells(data: bytes) -> list[dict[str, Any]]:
     """Return normalized non-empty cells for persistence and audit/search."""
+    if data[:8] == _OLE_MAGIC:
+        raise CompileError(["legacy .xls workbooks are not supported; save the file as .xlsx"])
     if data[:2] == b"PK":
-        try:
-            from openpyxl import load_workbook
-        except ImportError as exc:
-            raise CompileError(["XLSX support requires openpyxl"]) from exc
-        source = io.BytesIO(data)
-        formulas = load_workbook(source, data_only=False, read_only=False)
-        source.seek(0)
-        values = load_workbook(source, data_only=True, read_only=False)
+        book = _Book(data)
         out: list[dict[str, Any]] = []
-        for ws in formulas.worksheets:
-            value_ws = values[ws.title]
+        for ws in book.formulas.worksheets:
             for row in ws.iter_rows():
                 for cell in row:
                     authored = cell.value
-                    resolved = value_ws[cell.coordinate].value
+                    resolved = book.value(ws.title, cell.coordinate)
                     if authored is None and resolved is None:
                         continue
                     num = _number(resolved)
@@ -422,6 +536,7 @@ def extract_workbook_cells(data: bytes) -> list[dict[str, Any]]:
                                 else str(resolved if resolved is not None else authored)
                             ),
                             "fmt": str(cell.number_format or ""),
+                            "formula": authored if isinstance(authored, str) and authored.startswith("=") else None,
                         }
                     )
         return out
@@ -443,6 +558,57 @@ def extract_workbook_cells(data: bytes) -> list[dict[str, Any]]:
                     "value_num": (num / 100 if num is not None and "%" in value else num),
                     "value_text": value,
                     "fmt": "percent" if "%" in value else "",
+                    "formula": None,
                 }
             )
     return out
+
+
+def extract_workbook_rows(data: bytes) -> list[dict[str, Any]]:
+    """Row-level normalized text for retrieval: "Label - Header: value; ...".
+
+    Each row keeps its sheet and A1 range so a chat answer quoting it cites
+    the exact cells. Values are the same displays the deck shows.
+    """
+    cells = extract_workbook_cells(data)
+    by_row: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for cell in cells:
+        match = re.fullmatch(r"([A-Z]+)(\d+)", cell["addr"])
+        if not match:
+            continue
+        by_row.setdefault((cell["sheet"], int(match.group(2))), []).append(cell)
+    headers: dict[str, dict[str, str]] = {}
+    out: list[dict[str, Any]] = []
+    for (sheet, row_num), row in sorted(by_row.items(), key=lambda item: (item[0][0], item[0][1])):
+        row.sort(key=lambda cell: _col_index(cell["addr"]))
+        texts = [str(cell.get("value_text") or "").strip() for cell in row]
+        if sheet not in headers and _columns([_norm(text) for text in texts]):
+            headers[sheet] = {re.sub(r"\d+", "", cell["addr"]): text for cell, text in zip(row, texts)}
+            continue
+        names = headers.get(sheet, {})
+        parts: list[str] = []
+        for cell, text in zip(row, texts):
+            if not text:
+                continue
+            column = re.sub(r"\d+", "", cell["addr"])
+            label = names.get(column)
+            parts.append(f"{label}: {text}" if label and parts else text)
+        if not parts:
+            continue
+        out.append(
+            {
+                "sheet": sheet,
+                "row_num": row_num,
+                "range_ref": f"{row[0]['addr']}:{row[-1]['addr']}" if len(row) > 1 else row[0]["addr"],
+                "text": parts[0] + (" - " + "; ".join(parts[1:]) if len(parts) > 1 else ""),
+            }
+        )
+    return out
+
+
+def _col_index(addr: str) -> int:
+    letters = re.match(r"[A-Z]+", addr).group(0)
+    total = 0
+    for char in letters:
+        total = total * 26 + ord(char) - 64
+    return total

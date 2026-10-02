@@ -10,11 +10,13 @@ import os
 
 #: Kinds accepted by the upload endpoint. Mirrors the ``asset_kind`` enum in
 #: ``schema/schema.sql``.
-ALLOWED_ASSET_KINDS = frozenset({"recording", "workbook", "document", "attachment"})
+ALLOWED_ASSET_KINDS = frozenset(
+    {"recording", "workbook", "document", "attachment", "presentation", "image", "package"}
+)
 
-#: Upper bound for a single uploaded asset (1 GiB). Uploads are read in
-#: chunks so one request cannot exhaust worker memory.
-MAX_UPLOAD_BYTES = 1024**3
+#: Upper bound for a single uploaded asset. Uploads stream to private storage
+#: in bounded parts, so the API never holds a whole body in memory.
+MAX_UPLOAD_BYTES = int(os.environ.get("GROUNDED_MAX_UPLOAD_BYTES") or 4 * 1024**3)
 
 _CHUNK_SIZE = 8 * 1024 * 1024
 

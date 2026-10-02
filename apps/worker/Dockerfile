@@ -2,7 +2,7 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY apps/worker/requirements.txt .
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg fonts-dejavu-core curl ca-certificates \
+    ffmpeg fonts-dejavu-core curl ca-certificates tesseract-ocr \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir -r requirements.txt
 COPY infra/install-local-models.sh /tmp/install-local-models.sh
@@ -17,5 +17,6 @@ ENV HF_HUB_OFFLINE=1 \
     PIPER_MODEL=/opt/piper/en_US-lessac-medium.onnx \
     WHISPER_CACHE=/opt/whisper \
     WHISPER_MODEL=base \
-    EGRESS_MODE=offline
+    GROUNDED_DEPLOYMENT_MODE=offline \
+    TRANSFORMERS_OFFLINE=1
 CMD ["python", "-m", "worker.main"]

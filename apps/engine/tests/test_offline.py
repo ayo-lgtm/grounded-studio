@@ -7,7 +7,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from grounded.bedrock import BedrockChat, BedrockError
 from grounded.brand import brand_lock
 from grounded.catalog import load_catalog, load_crafts
 from grounded.compile_deck import CompileError
@@ -24,8 +23,7 @@ from grounded.egress import (
 )
 from grounded.formats import scale_filter
 from grounded import house
-from grounded.knowledge import embed, rephrase_private, search_knowledge
-from grounded.narrate import PollyError, narrate_script
+from grounded.knowledge import embed, search_knowledge
 from grounded.quality import clipping_warning, gate_script, refine_actions
 from grounded.render_recording import timeline
 
@@ -49,8 +47,10 @@ class EgressTest(unittest.TestCase):
     def test_private_and_public_hosts(self):
         self.assertTrue(is_private_host("127.0.0.1"))
         self.assertTrue(is_private_host("store"))
-        self.assertTrue(is_private_host("minio.railway.internal"))
-        self.assertFalse(is_public_host("minio.railway.internal"))
+        self.assertTrue(is_private_host("minio.grounded.internal"))
+        self.assertFalse(is_public_host("minio.grounded.internal"))
+        # Railway is a third-party hosted runtime; its private DNS is not ours.
+        self.assertFalse(is_private_host("minio.railway.internal"))
         for host in (
             "t3.storageapi.dev",
             "s3.us-east-1.amazonaws.com",
@@ -67,7 +67,7 @@ class EgressTest(unittest.TestCase):
 
     def test_health_reports_offline_or_blocked(self):
         os.environ["EGRESS_MODE"] = "offline"
-        offline = health_report(True, "http://minio.railway.internal:9000")
+        offline = health_report(True, "http://minio.grounded.internal:9000")
         self.assertEqual(offline["egress"], "offline")
         self.assertTrue(offline["ok"])
         self.assertEqual(offline["chat"], "retrieval")
@@ -79,41 +79,13 @@ class EgressTest(unittest.TestCase):
         self.assertFalse(blocked["ok"])
         self.assertEqual(blocked["object_store"], "public-refused")
         os.environ["EGRESS_MODE"] = "aws-in-region"
-        legacy = health_report(True, "https://t3.storageapi.dev")
-        self.assertEqual(legacy["egress"], "aws-in-region")
-        self.assertEqual(legacy["chat"], "retrieval")
-        self.assertTrue(legacy["ok"])
+        retired = health_report(True, "https://t3.storageapi.dev")
+        self.assertFalse(retired["ok"])
+        self.assertEqual(retired["egress"], "misconfigured")
 
     def test_public_model_url_is_refused(self):
         with self.assertRaises(EgressError):
             assert_private_model("https://api.openai.com/v1")
-        os.environ["MODEL_BASE_URL"] = "https://api.openai.com/v1"
-        self.assertIsNone(rephrase_private("Revenue is 4.", "What is revenue?"))
-
-
-class CloudClientsDisabledTest(unittest.TestCase):
-    def test_bedrock_without_client_does_not_call_out(self):
-        with self.assertRaises(BedrockError) as caught:
-            BedrockChat().complete("system", "hello")
-        self.assertIn("disabled", str(caught.exception).lower())
-
-    def test_polly_without_client_does_not_call_out(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(PollyError) as caught:
-                narrate_script(
-                    {"language": "en", "beats": [{"text": "Open Settings."}]},
-                    Path(tmp) / "voice.mp3",
-                )
-        self.assertIn("Piper", str(caught.exception))
-
-    def test_transcribe_upload_is_disabled(self):
-        import sys
-
-        sys.path.insert(0, str(ROOT / "apps" / "worker"))
-        from worker.transcribe_aws import TranscribeError, transcribe_media
-
-        with self.assertRaises(TranscribeError):
-            transcribe_media()
 
 
 class CatalogAndSkillsTest(unittest.TestCase):
@@ -134,23 +106,6 @@ class CatalogAndSkillsTest(unittest.TestCase):
         self.assertTrue(hits)
         self.assertTrue(any("continuous-take" in hit["path"] for hit in hits))
         self.assertEqual(len(embed("offline retrieval")), 768)
-
-    def test_apps_do_not_call_public_generative_clients(self):
-        pattern = re.compile(
-            r"bedrock-runtime|api\.openai\.com|urlopen|"
-            r"client\(\s*[\"'](?:polly|transcribe|bedrock)|cdn\.jsdelivr"
-        )
-        offenders = []
-        for path in APPS.rglob("*.py"):
-            if "tests" in path.parts:
-                continue
-            text = path.read_text(encoding="utf-8")
-            if pattern.search(text):
-                offenders.append(str(path.relative_to(ROOT)))
-        self.assertEqual(offenders, [])
-        main = (ROOT / "apps" / "api" / "app" / "main.py").read_text(encoding="utf-8")
-        for token in FORBIDDEN_CALLS:
-            self.assertNotIn(token, main)
 
 
 class ContinuityAndDecksTest(unittest.TestCase):

@@ -1,5 +1,5 @@
 # craft: variance-analysis
-version: 1.0.0
+version: 1.1.0
 offline: true
 used_by: weekly-ops-review, finance-wbr, half-year-business-review, executive-business-review
 
@@ -59,3 +59,10 @@ Never suppress a large adverse or favorable variance solely to improve the story
 - sign is preserved;
 - no causal wording without causal evidence;
 - no cross-period comparison when scopes differ.
+
+## Runtime
+Machine-read by `grounded.contracts`.
+runtime_checks:
+  - derived-lineage
+  - recompute-derived
+  - single-unit-ranking

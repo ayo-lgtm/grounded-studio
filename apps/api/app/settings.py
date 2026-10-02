@@ -7,16 +7,17 @@ class Settings(BaseSettings):
     minio_endpoint: str = "http://127.0.0.1:9000"
     minio_bucket: str = "grounded"
     minio_region: str = "us-east-1"
-    minio_access_key: str = "grounded"
-    minio_secret_key: str = "change-me-too"
+    minio_access_key: str = ""
+    minio_secret_key: str = ""
     model_base_url: str = ""
     model_name: str = "local-instruct"
-    egress_mode: str = "offline"
-    dev_bypass_auth: bool = False
-    dev_user_email: str = "dev@internal"
+    grounded_env: str = "production"
+    cors_origins: str = ""
+    bootstrap_admins: str = ""
 
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
 
 settings = Settings()

@@ -159,3 +159,37 @@ Crafts for this section: `carry-boundary`, `quality-gate`, `refine-loop`, `place
 Shared modules live under `skills/_crafts/`. New or rewritten for this expansion: `edl-cut`, `caption-track`, `frame-still`, `local-ocr`, `av-sync`, `citation-footer`, `redaction-mask`, `wbr-spine`, `slideshow-advance`, `duck-mix`, `screen-ingest`, `carry-boundary`, `quality-gate`, `refine-loop`, `placement-formats`, `brand-kit`. Existing crafts keep their jobs and now declare `offline: true`.
 
 Expansion count: **67** skills (55 plus the 12 continuity and offline-studio skills above). The v1 list is unchanged.
+
+## Executable contracts
+
+`SKILL.md` files are runtime policy, not only prose. The registry
+(`apps/engine/grounded/skill_registry.py`) parses each contract's header,
+version, `crafts_required`, and its `## Runtime` section; `contracts.py`
+turns that into an enforced runtime:
+
+```
+runtime_compiler: workbook-deck | document-deck | recording | mixed
+runtime_accepts:        source kinds the skill may use
+runtime_requires_any:   at least one must be present (else the compile fails)
+runtime_layouts:        subset of the renderer layouts
+runtime_max_slides:     hard cap
+runtime_checks:         deterministic check ids (crafts add their own)
+```
+
+Business-review skills and their crafts:
+
+| Skill | Version | Requires | Cap | Crafts (checks) |
+|---|---|---|---|---|
+| `weekly-ops-review` | 2.1.0 | workbook | 24 | workbook-analysis, variance-analysis, chart-selection, source-visualization, data-narration |
+| `finance-wbr` | 1.1.0 | workbook | 24 | same |
+| `half-year-business-review` | 1.1.0 | workbook | 30 | same |
+| `executive-business-review` | 1.1.0 | workbook, document, presentation or screenshot | 6 | same |
+
+Craft checks: `cell-exists`, `source-range-cited` (workbook-analysis,
+source-visualization); `derived-lineage`, `recompute-derived`,
+`single-unit-ranking` (variance-analysis, chart-selection); `numbers-cited`,
+`no-unsourced-causal`, `model-text-reviewed` (data-narration). A check id
+the runtime does not implement fails the compile. Every script records
+`skill_id`, `skill_version`, `skill_sha256`, `craft_versions`,
+`craft_sha256` and `checks_run`; the worker persists them in
+`script_versions.provenance`.

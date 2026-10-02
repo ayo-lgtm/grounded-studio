@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
 
 from .brand import brand_lock
-from .compile_deck import CompileError, _movers_beat, cell_index, compile_document, compile_workbook
+from .compile_deck import (
+    CompileError,
+    _movers_beat,
+    _text_claims,
+    cell_index,
+    compile_document,
+    compile_workbook,
+)
+from .contracts import runtime_for
 from .compile_recording import compile_recording
 from .continuity import verify_carry
 from .formats import placement_plan
-from .layouts import SKILL_RENDERER, SLIDESHOW_SKILLS
+from .layouts import SKILL_LAYOUTS, SKILL_RENDERER, SLIDESHOW_SKILLS
 from .quality import gate_script, refine_actions
 from .ingest_workbook import parse_workbook
-from .skill_registry import SkillRegistryError, execution_provenance
+from .skill_registry import SkillRegistryError, execution_provenance, resolve_skill
 
 WORKBOOK_SKILLS = frozenset(
     {
@@ -61,6 +70,36 @@ FLEX = frozenset(
 CARRY_CHECK = frozenset({"carry-boundary-verify", "continuous-take-demo"})
 
 
+@dataclass
+class SourceDoc:
+    asset_id: str | None
+    kind: str  # document | presentation | image
+    doc: dict[str, Any]
+
+
+@dataclass
+class SourceBundle:
+    """Everything a briefing may cite, each piece tagged with its asset id."""
+
+    workbook: bytes | None = None
+    workbook_asset: str | None = None
+    documents: list[SourceDoc] = field(default_factory=list)
+    segments: list[dict[str, Any]] = field(default_factory=list)
+    recording_asset: str | None = None
+    duration_ms: int | None = None
+
+    def kinds(self) -> set[str]:
+        present = {doc.kind for doc in self.documents}
+        if self.workbook:
+            present.add("workbook")
+        if self.spoken():
+            present.add("recording")
+        return present
+
+    def spoken(self) -> list[dict[str, Any]]:
+        return [dict(seg) for seg in self.segments if (seg.get("text") or "").strip()]
+
+
 def compile_for_skill(
     *,
     skill_id: str,
@@ -70,13 +109,34 @@ def compile_for_skill(
     workbook: bytes | None,
     sources: Any,
 ) -> dict[str, Any]:
-    spoken = [dict(segment) for segment in (segments or []) if (segment.get("text") or "").strip()]
+    """Legacy single-asset entry point."""
+    bundle = SourceBundle(workbook=workbook, segments=list(segments or []))
+    if document:
+        bundle.documents.append(SourceDoc(None, "document", sources.load_document(document)))
+    return compile_bundle(skill_id=skill_id, title=title, bundle=bundle, sources=sources)
+
+
+def compile_bundle(*, skill_id: str, title: str, bundle: SourceBundle, sources: Any = None) -> dict[str, Any]:
+    if sources is None:
+        from . import compile_sources as sources
+    try:
+        skill, crafts = resolve_skill(skill_id)
+        runtime = runtime_for(skill, crafts)
+    except SkillRegistryError as exc:
+        raise CompileError([str(exc)]) from exc
+    input_errors = runtime.check_inputs(bundle.kinds())
+    if input_errors:
+        raise CompileError(input_errors)
+
+    spoken = bundle.spoken()
+    documents = list(bundle.documents)
+    workbook = bundle.workbook
     if skill_id in FLEX:
         if spoken:
             chosen = "product-walkthrough"
-        elif workbook and not document:
+        elif workbook and not documents:
             chosen = "weekly-ops-review"
-        elif document:
+        elif documents:
             chosen = "leadership-brief"
         else:
             chosen = "product-walkthrough"
@@ -85,22 +145,28 @@ def compile_for_skill(
 
     if workbook and (
         chosen in WORKBOOK_SKILLS
-        or (not document and chosen not in sources.DOCUMENT_SKILLS and not spoken)
+        or (not documents and chosen not in sources.DOCUMENT_SKILLS and not spoken)
     ):
         pack = parse_workbook(workbook)
         target = chosen if chosen in WORKBOOK_SKILLS else "weekly-ops-review"
-        script = specialize_workbook(pack, target)
+        extra = _document_notes(documents, target) if documents and _accepts_documents(runtime) else []
+        script = specialize_workbook(pack, target, extra_beats=extra)
+        _tag(script, "workbook", bundle.workbook_asset)
+        if pack.get("data_quality"):
+            script["data_quality"] = list(pack["data_quality"])
         _finish(script, skill_id if skill_id in FLEX else target, pack)
+        _contract_gate(script, skill_id if skill_id in FLEX else target, cell_index(pack))
         _approve(script, cells=cell_index(pack))
         return script
 
     if chosen in WORKBOOK_SKILLS and chosen != "executive-business-review" and not workbook:
         raise CompileError([f"{skill_id} needs a workbook upload"])
 
-    if document and (chosen in sources.DOCUMENT_SKILLS or not spoken):
+    if documents and (chosen in sources.DOCUMENT_SKILLS or not spoken):
         doc_skill = chosen if chosen in sources.DOCUMENT_SKILLS else "leadership-brief"
-        script = compile_document(sources.load_document(document), doc_skill)
+        script = _compile_documents(documents, doc_skill)
         _finish(script, skill_id if skill_id in FLEX else doc_skill, None)
+        _contract_gate(script, skill_id if skill_id in FLEX else doc_skill, None)
         _approve(script)
         return script
 
@@ -114,22 +180,111 @@ def compile_for_skill(
             title=title or "Walkthrough",
             carry=record_as not in SLIDESHOW_SKILLS,
         )
+        _tag(script, "recording", bundle.recording_asset)
+        if bundle.duration_ms:
+            script["source_duration_ms"] = max(int(bundle.duration_ms), int(script.get("source_duration_ms") or 0))
         _finish(script, skill_id if skill_id in FLEX else record_as, None)
         if record_as in CARRY_CHECK or skill_id in CARRY_CHECK:
             errors = verify_carry(script)
             if errors:
                 raise CompileError(errors)
+        _contract_gate(script, skill_id if skill_id in FLEX else record_as, None)
         _approve(script)
         return script
 
     if skill_id in RECORDING_SKILLS:
         raise CompileError(["transcribe first"])
-    raise CompileError(["upload a workbook, PDF/DOCX, or recording before compile"])
+    raise CompileError(["upload a workbook, PDF/DOCX/PPTX, screenshot, or recording before compile"])
 
 
-def specialize_workbook(pack: dict[str, Any], skill_id: str) -> dict[str, Any]:
+def _accepts_documents(runtime) -> bool:
+    return bool(runtime.accepts & {"document", "presentation", "image"})
+
+
+def _document_notes(documents: list[SourceDoc], skill_id: str) -> list[dict[str, Any]]:
+    """Risk/ask beats quoted verbatim from accompanying documents."""
+    allowed = SKILL_LAYOUTS.get(skill_id, frozenset())
+    beats: list[dict[str, Any]] = []
+    for source in documents:
+        for block in source.doc.get("blocks") or []:
+            role = block.get("role")
+            text = str(block.get("text") or "").strip()
+            if role not in {"risk", "ask"} or role not in allowed or not text:
+                continue
+            cite = {"kind": "document", "block_id": block["id"]}
+            if source.asset_id:
+                cite["asset_id"] = source.asset_id
+            if block.get("page") is not None:
+                cite["page"] = block["page"]
+            beats.append(
+                {
+                    "kind": role,
+                    "layout": role,
+                    "text": text,
+                    "slots": {"eyebrow": role.capitalize()},
+                    "claims": _text_claims(text, block["id"]),
+                    "citations": [cite],
+                }
+            )
+    return beats
+
+
+def _compile_documents(documents: list[SourceDoc], skill_id: str) -> dict[str, Any]:
+    primary = documents[0]
+    script = compile_document(primary.doc, skill_id)
+    _tag(script, "document", primary.asset_id, pages=_pages(primary.doc))
+    for extra in documents[1:]:
+        more = compile_document(extra.doc, skill_id)
+        _tag(more, "document", extra.asset_id, pages=_pages(extra.doc))
+        # The extra document's own cover becomes an evidence statement only
+        # when the skill allows statements; otherwise it is skipped.
+        body = [beat for beat in more["beats"] if beat.get("layout") != "cover"]
+        script["beats"].extend(body)
+    for index, beat in enumerate(script["beats"], start=1):
+        beat["ord"] = index
+    return script
+
+
+def _pages(doc: dict[str, Any]) -> dict[str, int]:
+    return {str(block.get("id")): int(block["page"]) for block in doc.get("blocks") or [] if block.get("page") is not None}
+
+
+def _tag(script: dict[str, Any], kind: str, asset_id: str | None, pages: dict[str, int] | None = None) -> None:
+    for beat in script.get("beats") or []:
+        for cite in beat.get("citations") or []:
+            if cite.get("kind") != kind:
+                continue
+            if asset_id and not cite.get("asset_id"):
+                cite["asset_id"] = asset_id
+            if pages and cite.get("block_id") in pages and "page" not in cite:
+                cite["page"] = pages[cite["block_id"]]
+
+
+def _contract_gate(script: dict[str, Any], skill_id: str, cells: dict | None) -> None:
+    from .contracts import run_checks
+
+    try:
+        skill, crafts = resolve_skill(skill_id)
+        runtime = runtime_for(skill, crafts)
+    except SkillRegistryError as exc:
+        raise CompileError([str(exc)]) from exc
+    errors = run_checks(script, runtime, cells)
+    if errors:
+        raise CompileError(errors)
+    script.setdefault("provenance", {})["checks_run"] = ["layout-allowed", "max-slides", *runtime.checks]
+
+
+def specialize_workbook(
+    pack: dict[str, Any], skill_id: str, extra_beats: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
     """Build the full cited deck, then narrow. Empty required KPIs fail first."""
     full = compile_workbook(pack, "weekly-ops-review")
+    if extra_beats:
+        asks = [beat for beat in full["beats"] if beat.get("layout") == "ask"]
+        head = [beat for beat in full["beats"] if beat.get("layout") != "ask"]
+        doc_risks = [beat for beat in extra_beats if beat.get("layout") == "risk"]
+        doc_asks = [beat for beat in extra_beats if beat.get("layout") == "ask"]
+        full = {**full, "beats": head + doc_risks + asks + doc_asks}
     if skill_id in {"weekly-ops-review", "finance-wbr", "half-year-business-review", "wbr-kpi-spine", "wbr-ops-deep-dive", "brand-kit-lock"}:
         beats = list(full["beats"])
     elif skill_id in {"wbr-executive", "executive-business-review"}:

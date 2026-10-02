@@ -1,17 +1,22 @@
-# 16 — Railway runtime disabled
+# 16 — Railway is not a supported runtime
 
 Grounded Studio must not receive WBRs, internal documents, recordings,
-screenshots, transcripts, prompts, or artifacts on Railway or another
-third-party managed application runtime.
+screenshots, transcripts, prompts or artifacts on Railway or any other
+third-party managed application host.
 
-The repository keeps a minimal Railway IaC declaration with **zero runtime
-resources** so any old linked test project can converge toward no Grounded
-Studio application/storage deployment.
+* `.railway/railway.ts` declares a project with **zero resources**, so an
+  old linked test project converges to no Grounded Studio services or
+  storage.
+* API and worker refuse to start when they detect a hosted-runtime marker
+  (`RAILWAY_ENVIRONMENT`, `RAILWAY_PROJECT_ID`, `VERCEL`, `RENDER`,
+  `FLY_APP_NAME`, `HEROKU_APP_ID`, `NETLIFY`), in every deployment mode.
+* `*.railway.internal` and `*.railway.app` are on the policy deny list, so a
+  leftover Railway private-DNS endpoint is not treated as private.
 
-The application also rejects known managed-hosting runtime environment markers
-while private mode is active.
+Deploy on company-controlled infrastructure: `infra/compose.yaml` for a
+single internal host (offline profile), Kubernetes with
+`infra/k8s/networkpolicy.yaml`, or AWS with `infra/aws/terraform/`
+(aws-private profile). See [18](18-deployment-profiles.md).
 
-For real use, deploy on company-controlled infrastructure using
-`infra/compose.yaml` or an equivalent private self-hosted stack. Keep
-Postgres, Redis, MinIO, ASR, LLM/embeddings, TTS, and rendering inside that
-boundary.
+Anything still stored in a former Railway/Tigris test bucket should be
+deleted by its owner; this repository no longer references it.

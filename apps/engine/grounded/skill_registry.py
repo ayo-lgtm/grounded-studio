@@ -29,12 +29,27 @@ class SkillContract:
     path: Path
     crafts: tuple[str, ...] = ()
     contract_text: str = ""
+    fields: tuple[tuple[str, str], ...] = ()
+    lists: tuple[tuple[str, tuple[str, ...]], ...] = ()
+
+    def field(self, name: str, default: str = "") -> str:
+        return dict(self.fields).get(name, default)
+
+    def items(self, name: str) -> tuple[str, ...]:
+        return dict(self.lists).get(name, ())
+
+    @property
+    def sha256(self) -> str:
+        import hashlib
+
+        return hashlib.sha256(self.contract_text.encode("utf-8")).hexdigest()
 
     def provenance(self) -> dict[str, object]:
         return {
             "skill_id": self.id,
             "skill_version": self.version,
-            "skill_path": self.path.as_posix(),
+            "skill_sha256": self.sha256,
+            "skill_path": _display_path(self.path),
             "crafts": list(self.crafts),
             "contract_text": self.contract_text,
         }
@@ -96,6 +111,7 @@ def parse_contract(path: str | Path) -> SkillContract:
 
     fields: dict[str, str] = {}
     crafts: list[str] = []
+    lists: dict[str, list[str]] = {}
     list_name: str | None = None
     for raw in lines[1:]:
         stripped = raw.strip()
@@ -109,11 +125,13 @@ def parse_contract(path: str | Path) -> SkillContract:
             fields[key] = value
             list_name = key if value == "" else None
             continue
-        if stripped.startswith("-") and list_name == "crafts_required":
+        if stripped.startswith("-") and list_name:
             item = stripped[1:].strip()
-            craft_id = re.split(r"\s+when\s+", item, maxsplit=1, flags=re.I)[0].strip()
-            if craft_id:
-                crafts.append(craft_id)
+            lists.setdefault(list_name, []).append(item)
+            if list_name == "crafts_required":
+                craft_id = re.split(r"\s+when\s+", item, maxsplit=1, flags=re.I)[0].strip()
+                if craft_id:
+                    crafts.append(craft_id)
 
     version = fields.get("version")
     if not version:
@@ -126,7 +144,16 @@ def parse_contract(path: str | Path) -> SkillContract:
         path=source,
         crafts=tuple(dict.fromkeys(crafts)),
         contract_text=text,
+        fields=tuple(sorted(fields.items())),
+        lists=tuple((key, tuple(values)) for key, values in sorted(lists.items())),
     )
+
+
+def _display_path(path: Path) -> str:
+    parts = path.as_posix().split("/")
+    if "skills" in parts:
+        return "/".join(parts[parts.index("skills"):])
+    return path.name
 
 
 def catalog(root: str | Path | None = None) -> tuple[SkillContract, ...]:
@@ -139,8 +166,13 @@ def catalog(root: str | Path | None = None) -> tuple[SkillContract, ...]:
 
 def execution_provenance(skill_id: str, root: str | Path | None = None) -> dict[str, object]:
     skill, crafts = resolve_skill(skill_id, root)
+    from .contracts import runtime_for
+
+    runtime = runtime_for(skill, crafts)
     return {
         **skill.provenance(),
         "craft_versions": {craft.id: craft.version for craft in crafts},
+        "craft_sha256": {craft.id: craft.sha256 for craft in crafts},
         "craft_contracts": {craft.id: craft.contract_text for craft in crafts},
+        "runtime": runtime.describe(),
     }

@@ -1,5 +1,5 @@
 # craft: chart-selection
-version: 1.0.0
+version: 1.1.0
 offline: true
 used_by: weekly-ops-review, finance-wbr, half-year-business-review, executive-business-review, leadership-brief
 
@@ -43,3 +43,8 @@ They may not invent causes, forecasts, or recommendations.
 - zero baseline is used for bars unless a documented exception applies;
 - time axes remain chronological;
 - highlights correspond to cited cells/series.
+
+## Runtime
+Machine-read by `grounded.contracts`.
+runtime_checks:
+  - single-unit-ranking

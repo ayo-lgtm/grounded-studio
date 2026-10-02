@@ -1,5 +1,5 @@
 # craft: workbook-analysis
-version: 1.0.0
+version: 1.1.0
 offline: true
 used_by: weekly-ops-review, finance-wbr, half-year-business-review, executive-business-review
 
@@ -52,3 +52,9 @@ When ambiguous, emit an ambiguity object for the Director instead of silently ch
 - formulas are never replaced with invented calculations;
 - reporting periods are internally consistent;
 - no narrative generation begins while required metric identity is ambiguous.
+
+## Runtime
+Machine-read by `grounded.contracts`.
+runtime_checks:
+  - cell-exists
+  - source-range-cited

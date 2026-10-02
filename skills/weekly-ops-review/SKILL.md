@@ -1,5 +1,5 @@
 # skill: weekly-ops-review
-version: 2.0.0
+version: 2.1.0
 offline: true
 job: Recurring operations/business review from a workbook, with cited metrics, defensible variance analysis, and source-faithful visuals.
 
@@ -77,3 +77,26 @@ outputs:
   - data_quality.json
 
 refresh_policy: upload the new comparable workbook; re-run semantic mapping and variance analysis; preserve metric identity only when the saved template/policy still resolves unambiguously.
+
+## Runtime
+Machine-read by `grounded.contracts`; unknown check ids fail the compile.
+runtime_compiler: workbook-deck
+runtime_accepts:
+  - workbook
+  - document
+  - presentation
+runtime_requires_any:
+  - workbook
+runtime_layouts:
+  - cover
+  - big-number
+  - versus-target
+  - movers
+  - source-range
+  - risk
+  - ask
+runtime_max_slides: 24
+runtime_checks:
+  - citations-present
+  - numbers-cited
+  - period-cited

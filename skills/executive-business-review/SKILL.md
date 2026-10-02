@@ -1,5 +1,5 @@
 # skill: executive-business-review
-version: 1.0.0
+version: 1.1.0
 offline: true
 job: Produce a concise leadership-ready business review from mixed workbook, document, PDF, and recording evidence.
 
@@ -55,3 +55,32 @@ outputs:
   - evidence appendix
   - conflict log
   - calculation audit
+
+## Runtime
+Machine-read by `grounded.contracts`; unknown check ids fail the compile.
+runtime_compiler: mixed
+runtime_accepts:
+  - workbook
+  - document
+  - presentation
+  - image
+  - recording
+runtime_requires_any:
+  - workbook
+  - document
+  - presentation
+  - image
+runtime_layouts:
+  - cover
+  - big-number
+  - versus-target
+  - movers
+  - source-range
+  - risk
+  - ask
+  - statement
+runtime_max_slides: 6
+runtime_checks:
+  - citations-present
+  - numbers-cited
+  - period-cited
