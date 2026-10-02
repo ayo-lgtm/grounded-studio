@@ -1,5 +1,6 @@
 # skill: feature-delta
 version: 1.0.0
+offline: true
 job: Explain what changed since a parent walkthrough using a new clip and/or changelog document.
 
 inputs_required:
@@ -21,6 +22,7 @@ story_beats:
   - how to switch / migrate if the source says so
 
 forbidden:
+  - any external HTTP API, SaaS endpoint, cloud ASR, cloud TTS, cloud LLM, cloud embeddings, or cloud render; no public internet egress
   - rewriting unchanged chapters in a way that drops citations
   - claiming a change not in the new source
 

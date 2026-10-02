@@ -1,5 +1,6 @@
 # skill: leadership-brief
 version: 1.0.0
+offline: true
 job: Compile a written document into a sparse leadership deck and optional short narration.
 
 inputs_required:
@@ -23,6 +24,7 @@ visual_grammar:
   - chrome comes from house.py
 
 forbidden:
+  - any external HTTP API, SaaS endpoint, cloud ASR, cloud TTS, cloud LLM, cloud embeddings, or cloud render; no public internet egress
   - new recommendations
   - benchmarking against data not in the doc
   - "in conclusion we should" if the author did not say so
