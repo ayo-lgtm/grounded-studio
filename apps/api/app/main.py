@@ -20,8 +20,16 @@ from .ranges import content_type, slice_body
 from .settings import settings
 from .storage import put_fileobj, read_bytes, signed_url
 from .validation import UploadTooLarge, hash_limited, is_allowed_kind, sanitize_filename
+from grounded.network_policy import assert_private_runtime
 
 _ROOM = (Path(__file__).resolve().parent / "room.html").read_text(encoding="utf-8")
+
+assert_private_runtime(
+    ("DATABASE_URL", settings.database_url),
+    ("REDIS_URL", settings.redis_url),
+    ("MINIO_ENDPOINT", settings.minio_endpoint),
+    ("MODEL_BASE_URL", settings.model_base_url),
+)
 
 
 def _require_dev_auth() -> None:
@@ -54,7 +62,7 @@ class ChatIn(BaseModel):
 @app.get("/health")
 def health():
     ok = ping()
-    return {"ok": ok, "egress": "aws-in-region", "chat": "bedrock"}
+    return {"ok": ok, "egress": "public-blocked", "chat": "grounded-retrieval-only"}
 
 
 @app.get("/")
@@ -352,7 +360,7 @@ def artifact_file(artifact_id: str, request: Request, db: Session = Depends(get_
 @app.post("/api/v1/briefings/{briefing_id}/chat")
 def briefing_chat(briefing_id: str, body: ChatIn, db: Session = Depends(get_db)):
     _require_dev_auth()
-    from grounded.chat import answer_with_claude
+    from grounded.chat import answer
 
     question = (body.question or "").strip()
     if not question:
@@ -370,7 +378,7 @@ def briefing_chat(briefing_id: str, body: ChatIn, db: Session = Depends(get_db))
     if not row:
         raise HTTPException(404, "no script yet")
     raw = row[0] if isinstance(row[0], dict) else json.loads(row[0])
-    return answer_with_claude(raw, question[:2000])
+    return answer(raw, question[:2000])
 
 
 def _public_row(row) -> dict:
