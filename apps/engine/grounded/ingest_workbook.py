@@ -307,3 +307,61 @@ def _a1(row: int, col: int) -> str:
         n, rem = divmod(n - 1, 26)
         letters = chr(65 + rem) + letters
     return f"{letters}{row}"
+
+
+def extract_workbook_cells(data: bytes) -> list[dict[str, Any]]:
+    """Return normalized non-empty cells for persistence and audit/search."""
+    if data[:2] == b"PK":
+        try:
+            from openpyxl import load_workbook
+        except ImportError as exc:
+            raise CompileError(["XLSX support requires openpyxl"]) from exc
+        source = io.BytesIO(data)
+        formulas = load_workbook(source, data_only=False, read_only=False)
+        source.seek(0)
+        values = load_workbook(source, data_only=True, read_only=False)
+        out: list[dict[str, Any]] = []
+        for ws in formulas.worksheets:
+            value_ws = values[ws.title]
+            for row in ws.iter_rows():
+                for cell in row:
+                    authored = cell.value
+                    resolved = value_ws[cell.coordinate].value
+                    if authored is None and resolved is None:
+                        continue
+                    num = _number(resolved)
+                    out.append(
+                        {
+                            "sheet": ws.title,
+                            "addr": cell.coordinate,
+                            "value_num": num,
+                            "value_text": (
+                                _display(num, cell.number_format, _unit(cell.number_format))
+                                if num is not None
+                                else str(resolved if resolved is not None else authored)
+                            ),
+                            "fmt": str(cell.number_format or ""),
+                        }
+                    )
+        return out
+
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise CompileError(["CSV must be UTF-8 encoded"]) from exc
+    out: list[dict[str, Any]] = []
+    for rindex, row in enumerate(csv.reader(io.StringIO(text)), start=1):
+        for cindex, value in enumerate(row, start=1):
+            if value == "":
+                continue
+            num = _number(value)
+            out.append(
+                {
+                    "sheet": "CSV",
+                    "addr": _a1(rindex, cindex),
+                    "value_num": (num / 100 if num is not None and "%" in value else num),
+                    "value_text": value,
+                    "fmt": "percent" if "%" in value else "",
+                }
+            )
+    return out
