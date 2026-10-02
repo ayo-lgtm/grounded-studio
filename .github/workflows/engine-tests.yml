@@ -1,4 +1,4 @@
-name: engine-tests
+name: private-runtime-tests
 
 on:
   pull_request:
@@ -7,18 +7,33 @@ on:
       - main
 
 jobs:
-  engine:
+  private-runtime:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install engine runtime dependencies
-        run: pip install -r apps/worker/requirements.txt
+      - name: Install runtime dependencies
+        run: pip install -r apps/api/requirements.txt -r apps/worker/requirements.txt
+      - name: Reject cloud egress code paths
+        run: |
+          set -e
+          ! grep -R -nE 'bedrock-runtime|start_transcription_job|synthesize_speech|TranscriptFileUri|amazonaws\.com' apps/api apps/engine apps/worker
       - name: Run engine tests
         env:
           PYTHONPATH: apps/engine
           GROUNDED_SKILLS_ROOT: skills
         run: python -m unittest discover -s apps/engine/tests -p "test_*.py" -v
+      - name: Run worker tests
+        env:
+          PYTHONPATH: apps/worker:apps/engine
+          GROUNDED_SKILLS_ROOT: skills
+        run: python -m unittest discover -s apps/worker/tests -p "test_*.py" -v
+      - name: Run API tests
+        env:
+          PYTHONPATH: apps/api:apps/engine
+          GROUNDED_SKILLS_ROOT: skills
+          DEV_BYPASS_AUTH: "true"
+        run: python -m unittest discover -s apps/api/tests -p "test_*.py" -v
