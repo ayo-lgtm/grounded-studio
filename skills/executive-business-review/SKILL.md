@@ -1,5 +1,6 @@
 # skill: executive-business-review
 version: 1.0.0
+offline: true
 job: Produce a concise leadership-ready business review from mixed workbook, document, PDF, and recording evidence.
 
 inputs_required:
