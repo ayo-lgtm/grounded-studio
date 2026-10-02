@@ -220,21 +220,25 @@ def _kpi_beat(kpi: dict[str, Any]) -> dict[str, Any]:
 
 def _movers_beat(rows: list[dict[str, Any]]) -> dict[str, Any]:
     scored = [(row, row["value"] - row["prior"]) for row in rows]
-    lead, lead_delta = max(scored, key=lambda item: abs(item[1]))
-    unit = lead.get("unit") or "number"
-    if lead_delta == 0:
-        text = "No selected line moved versus the prior period."
-        claims: list[dict[str, Any]] = []
+    units = {row.get("unit") or "number" for row, _delta in scored}
+    claims: list[dict[str, Any]] = []
+    if len(units) > 1:
+        text = "Selected movements are shown by source unit; cross-unit movements are not ranked."
     else:
-        word = "up" if lead_delta > 0 else "down"
-        if unit == "pct":
-            delta_text = f"{abs(lead_delta) * 100:.1f} percentage points"
-            claim_value = abs(round(lead_delta * 100, 1))
+        lead, lead_delta = max(scored, key=lambda item: abs(item[1]))
+        unit = lead.get("unit") or "number"
+        if lead_delta == 0:
+            text = "No selected line moved versus the prior period."
         else:
-            delta_text = format_value(abs(lead_delta), unit)
-            claim_value = abs(lead_delta)
-        text = f"Largest selected move is {lead['label']}, {word} {delta_text} from the prior period."
-        claims = [{"value": claim_value, "sheet": lead["sheet"], "addr": lead["addr"], "derived": True}]
+            word = "up" if lead_delta > 0 else "down"
+            if unit == "pct":
+                delta_text = f"{abs(lead_delta) * 100:.1f} percentage points"
+                claim_value = abs(round(lead_delta * 100, 1))
+            else:
+                delta_text = format_value(abs(lead_delta), unit)
+                claim_value = abs(lead_delta)
+            text = f"Largest selected move is {lead['label']}, {word} {delta_text} from the prior period."
+            claims.append({"value": claim_value, "sheet": lead["sheet"], "addr": lead["addr"], "derived": True})
 
     table = []
     cites = []
