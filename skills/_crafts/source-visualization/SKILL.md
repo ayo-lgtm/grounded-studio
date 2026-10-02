@@ -1,5 +1,6 @@
 # craft: source-visualization
 version: 1.0.0
+offline: true
 used_by: weekly-ops-review, finance-wbr, half-year-business-review, executive-business-review, leadership-brief
 
 job: Decide when the audience should see the original source instead of a reconstructed abstraction.
