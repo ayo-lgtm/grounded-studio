@@ -31,6 +31,9 @@ SKILL_LAYOUTS = {
 
 SKILL_RENDERER = {
     "weekly-ops-review": "deck",
+    "finance-wbr": "deck",
+    "half-year-business-review": "deck",
+    "executive-business-review": "deck",
     "leadership-brief": "deck",
     "launch-announcement": "deck",
     "product-walkthrough": "recording",
