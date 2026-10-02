@@ -120,6 +120,12 @@ def _displayed(beat: dict[str, Any]) -> list[str]:
         for value in row.values():
             if isinstance(value, str):
                 strings.append(value)
+    visual = beat.get("visual") or {}
+    for row in visual.get("rows") or []:
+        for cell in row:
+            value = cell.get("display") if isinstance(cell, dict) else None
+            if isinstance(value, str):
+                strings.append(value)
     return strings
 
 
