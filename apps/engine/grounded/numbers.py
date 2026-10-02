@@ -23,8 +23,6 @@ def format_usd(value: float) -> str:
     n = abs(float(value))
     if n >= 1_000_000:
         return "{}${:.2f}M".format(sign, n / 1_000_000)
-    if n >= 1_000:
-        return "{}${:.1f}K".format(sign, n / 1_000)
     if n == int(n):
         return "{}${:,.0f}".format(sign, n)
     return "{}${:,.2f}".format(sign, n)
