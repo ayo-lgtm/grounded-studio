@@ -1,5 +1,6 @@
 # skill: finance-wbr
 version: 1.0.0
+offline: true
 job: Finance-grade weekly business review from an ordinary workbook, with exact lineage and source-first visuals.
 
 inputs_required:
