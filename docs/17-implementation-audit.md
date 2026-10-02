@@ -103,3 +103,27 @@ Required:
 ## Acceptance standard
 
 A finance user should be able to upload an ordinary workbook and ask for a WBR video or deck. The system should identify the reporting period, determine the important metrics and material variances, show the exact source range or cited chart when useful, narrate only supported conclusions, preserve every calculation's lineage, and refuse unsupported causal explanations.
+
+
+## Additional implementation findings
+
+### P0 security: authorization is not production-safe
+The API file itself states that SSO is not wired. More importantly, several read endpoints do not call the dev-auth gate at all. Listing/fetching briefings, fetching scripts, artifact metadata/content, and source-asset content are not workspace-membership scoped. Before real internal data is used, every request needs authenticated identity plus workspace/project authorization.
+
+### P0 truth: synthetic source UI can be rendered
+`source_screen.py` paints a synthetic "Grounded" interface when a real source video is absent. That is useful as a fixture, but it must never be used as evidence-bearing production footage. Production rendering must distinguish `fixture/synthetic` from `source capture` and fail closed when a source-faithful walkthrough is required.
+
+### P0 ingestion pipeline: parse/index are not implemented
+The schema anticipates parse/index jobs and normalized workbook/document tables, but the worker currently treats ingest/index as no-ops and compilation reads the latest raw asset bytes directly. The normalized `workbook_cells`, `document_blocks`, and `embedding_chunks` tables are therefore not yet the authoritative compile substrate.
+
+### P1 upload safety and memory
+The upload helper enforces a 1 GiB limit but accumulates every chunk into a Python list and joins it into one bytes object. A maximum-sized upload can therefore consume roughly gigabyte-scale application memory. Stream uploads directly to object storage and enforce MIME/extension/file-signature policy plus malware scanning appropriate to the deployment environment.
+
+### P1 documentation/runtime contradiction
+The TTS craft says cloud TTS is forbidden and names local engines, while `narrate.py` implements Amazon Polly. The product needs one explicit privacy policy for narration and the skill contract must match the deployed implementation.
+
+### P1 model/version provenance
+The database has `jobs.model_ids`, but generated scripts do not currently persist a complete execution provenance record: active skill version, craft versions, model identifier, prompt/policy version, source hashes, calculation policy, and renderer version. This should be immutable metadata on every accepted artifact.
+
+### P1 access-controlled artifact delivery
+Presigned URLs and same-origin artifact streaming are useful, but both must be authorized per requesting user/workspace before release. Do not treat an unguessable asset UUID as authorization.
