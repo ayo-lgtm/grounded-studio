@@ -177,6 +177,16 @@ def _member(db: Session = Depends(get_db), user: User = Depends(current_user)) -
     return user
 
 
+@app.get("/api/v1/me")
+def me(db: Session = Depends(get_db), user: User = Depends(_member)):
+    roles = db.execute(
+        text("SELECT role::text FROM workspace_members WHERE user_id = :u"), {"u": user.id}
+    ).scalars().all()
+    rank = max((ROLE_RANK.get(role, -1) for role in roles), default=-1)
+    best = next((name for name, value in ROLE_RANK.items() if value == rank), None)
+    return {"email": user.email, "role": best, "auth": AUTH_MODE}
+
+
 @app.get("/api/v1/projects")
 def list_projects(db: Session = Depends(get_db), user: User = Depends(_member)):
     rows = db.execute(

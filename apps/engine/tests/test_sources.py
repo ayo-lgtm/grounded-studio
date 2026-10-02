@@ -161,6 +161,23 @@ class WorkbookTest(unittest.TestCase):
         cover = script["beats"][0]
         self.assertIn({"value": 32, "sheet": "KPI", "addr": "A1", "in_text": True}, cover["claims"])
 
+    def test_numbers_in_workbook_notes_are_cited(self):
+        from grounded.dispatch import SourceBundle, compile_bundle
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "KPI"
+        ws.append(["Metric", "Actual"])
+        ws.append(["Orders", 10])
+        risks = wb.create_sheet("Risks")
+        risks.append(["Risk"])
+        risks.append(["Capacity is tight through week 34."])
+        buf = io.BytesIO()
+        wb.save(buf)
+        script = compile_bundle(skill_id="finance-wbr", title="t", bundle=SourceBundle(workbook=buf.getvalue(), workbook_asset="w"))
+        risk = next(b for b in script["beats"] if b["layout"] == "risk")
+        self.assertEqual(risk["claims"], [{"value": 34, "sheet": "Risks", "addr": "A2", "in_text": True}])
+
     def test_risks_and_asks_sheets_are_sourced(self):
         wb = Workbook()
         ws = wb.active

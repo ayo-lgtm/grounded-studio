@@ -65,9 +65,12 @@ class RoomPageTest(unittest.TestCase):
     def setUp(self):
         self.html = ROOM.read_text(encoding="utf-8")
 
-    def test_house_colors_only(self):
-        found = set(re.findall(r"#[0-9a-fA-F]{3,8}", self.html))
-        self.assertEqual(found, HOUSE)
+    def test_house_tokens_frame_the_briefings(self):
+        # The shell has its own design language, but the briefing surface
+        # keeps the deck masters' paper, ink, accent and negative.
+        root = re.search(r":root\s*\{(.*?)\}", self.html, re.S).group(1)
+        for token in ("--paper: #f3f0e8", "--ink: #1a1814", "--accent: #1d3c34", "--negative: #7a2e2e"):
+            self.assertIn(token, root)
 
     def test_docs_page_does_not_load_a_cdn(self):
         main = (ROOM.parent / "main.py").read_text(encoding="utf-8")
@@ -75,20 +78,26 @@ class RoomPageTest(unittest.TestCase):
         self.assertNotIn("jsdelivr", main)
         self.assertNotIn("swagger", main.lower())
 
-    def test_no_foreign_chrome(self):
+    def test_nothing_remote_is_loaded(self):
         lowered = self.html.lower()
-        self.assertNotIn("linear-gradient", lowered)
-        self.assertNotIn("box-shadow", lowered)
         self.assertIsNone(re.search(r"\binter\b", lowered))
         self.assertNotIn("https://", lowered)
         self.assertNotIn("http://", lowered)
-        for match in re.findall(r"border-radius\s*:\s*([^;]+)", lowered):
-            self.assertEqual(match.strip(), "0")
+        self.assertNotIn("@import", lowered)
+        self.assertNotIn("fonts.g", lowered)
+        self.assertIsNone(re.search(r"<script[^>]+src=", lowered))
+        self.assertIsNone(re.search(r"<link[^>]+stylesheet", lowered))
+
+    def test_every_view_is_present(self):
+        for marker in ('id="rail"', 'id="panel"', 'data-tab="sources"', 'data-tab="provenance"', 'id="scrub"', "That is not in", "Accept script"):
+            self.assertIn(marker, self.html)
+        for endpoint in ("/api/v1/briefings", "/sources", "/chat", "/script/accept", "/jobs", "/health", "/api/v1/me"):
+            self.assertIn(endpoint, self.html)
 
     def test_the_room_is_a_theater(self):
         self.assertIn("What should the room watch?", self.html)
         self.assertIn('id="stage"', self.html)
-        self.assertIn('for="q">Ask', self.html)
+        self.assertIn('for="q" class="sr">Ask', self.html)
         self.assertIn("Listening to the recording.", self.html)
         self.assertIn("Writing the script.", self.html)
         self.assertIn("Projecting the briefing.", self.html)

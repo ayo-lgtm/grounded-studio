@@ -181,6 +181,14 @@ class PrivateStackTest(unittest.TestCase):
         self.assertEqual(body["object_store"], "private")
         self.assertEqual(body["auth"], "oidc")
         self.assertEqual(body["providers"]["inference"], "none")
+        room = client.get("/")
+        self.assertEqual(room.status_code, 200)
+        self.assertIn("What should the room watch?", room.text)
+        self.assertIn("default-src 'self'", room.headers["content-security-policy"])
+        me = client.get("/api/v1/me", headers=auth()).json()
+        self.assertEqual(me["email"], "analyst@corp.internal")
+        self.assertEqual(me["role"], "admin")
+        self.assertEqual(client.get("/api/v1/me").status_code, 401)
 
     def test_01_endpoints_fail_closed_without_auth(self):
         for method, path in (
