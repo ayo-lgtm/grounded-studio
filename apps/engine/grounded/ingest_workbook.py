@@ -48,6 +48,10 @@ def _parse_xlsx(data: bytes) -> dict[str, Any]:
     movers: list[dict[str, Any]] = []
     period = ""
     title = ""
+    title_sheet = ""
+    title_addr = ""
+    period_sheet = ""
+    period_addr = ""
     warnings: list[str] = []
 
     for ws in formulas.worksheets:
@@ -59,8 +63,13 @@ def _parse_xlsx(data: bytes) -> dict[str, Any]:
         actual_header = ws.cell(header_row, actual_col).value
         if not period and actual_header is not None:
             period = str(actual_header)
+            period_sheet = ws.title
+            period_addr = ws.cell(header_row, actual_col).coordinate
         if not title:
-            title = f"{ws.title} Business Review"
+            candidate = ws.cell(1, 1).value if header_row > 1 else None
+            title = str(candidate).strip() if candidate not in (None, "") else f"{ws.title} Business Review"
+            title_sheet = ws.title
+            title_addr = ws.cell(1, 1).coordinate if candidate not in (None, "") else ws.cell(header_row, label_col).coordinate
 
         for row in range(header_row + 1, ws.max_row + 1):
             label = ws.cell(row, label_col).value
@@ -127,8 +136,8 @@ def _parse_xlsx(data: bytes) -> dict[str, Any]:
         )
     first = kpis[0]
     return {
-        "title": {"sheet": first["sheet"], "addr": first["addr"], "text": title or "Business Review"},
-        "period": {"sheet": first["sheet"], "addr": first["addr"], "text": period} if period else {},
+        "title": {"sheet": title_sheet or first["sheet"], "addr": title_addr or first["addr"], "text": title or "Business Review"},
+        "period": {"sheet": period_sheet or first["sheet"], "addr": period_addr or first["addr"], "text": period} if period else {},
         "kpis": kpis,
         "movers": movers,
         "risks": [],
@@ -201,8 +210,10 @@ def _parse_csv(data: bytes) -> dict[str, Any]:
                 )
     if not kpis:
         raise CompileError(["CSV review table contains no numeric actual values"])
+    title_text = rows[0][0].strip() if header_row > 0 and rows[0] and rows[0][0].strip() else "Business Review"
+    title_addr = "A1" if header_row > 0 else _a1(header_row + 1, label_col + 1)
     return {
-        "title": {"sheet": "CSV", "addr": "A1", "text": "Business Review"},
+        "title": {"sheet": "CSV", "addr": title_addr, "text": title_text},
         "period": {"sheet": "CSV", "addr": _a1(header_row + 1, actual_col + 1), "text": headers[actual_col]},
         "kpis": kpis,
         "movers": movers,
