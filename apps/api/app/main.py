@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import uuid
 from pathlib import Path
@@ -19,10 +18,18 @@ from .db import get_db, ping
 from .queue import enqueue, new_id
 from .ranges import content_type, slice_body
 from .settings import settings
-from .storage import put_bytes, read_bytes, signed_url
-from .validation import UploadTooLarge, is_allowed_kind, read_limited, sanitize_filename
+from .storage import put_fileobj, read_bytes, signed_url
+from .validation import UploadTooLarge, hash_limited, is_allowed_kind, sanitize_filename
+from grounded.network_policy import assert_private_runtime
 
 _ROOM = (Path(__file__).resolve().parent / "room.html").read_text(encoding="utf-8")
+
+assert_private_runtime(
+    ("DATABASE_URL", settings.database_url),
+    ("REDIS_URL", settings.redis_url),
+    ("MINIO_ENDPOINT", settings.minio_endpoint),
+    ("MODEL_BASE_URL", settings.model_base_url),
+)
 
 
 def _require_dev_auth() -> None:
@@ -101,6 +108,11 @@ def room():
 @app.post("/api/v1/briefings")
 def create_briefing(body: BriefingIn, db: Session = Depends(get_db)):
     _require_dev_auth()
+    from grounded.skill_registry import SkillRegistryError, resolve_skill
+    try:
+        contract, _crafts = resolve_skill(body.skill_id)
+    except SkillRegistryError as exc:
+        raise HTTPException(400, str(exc)) from exc
     briefing_id = new_id()
     project_id = body.project_id or _ensure_dev_project(db)
     db.execute(
@@ -109,7 +121,7 @@ def create_briefing(body: BriefingIn, db: Session = Depends(get_db)):
             INSERT INTO briefings
               (id, project_id, title, state, skill_id, skill_version, language, created_by)
             VALUES
-              (:id, :project_id, :title, 'draft', :skill_id, '1.0.0', 'en', :user_id)
+              (:id, :project_id, :title, 'draft', :skill_id, :skill_version, 'en', :user_id)
             """
         ),
         {
@@ -117,15 +129,17 @@ def create_briefing(body: BriefingIn, db: Session = Depends(get_db)):
             "project_id": project_id,
             "title": body.title,
             "skill_id": body.skill_id,
+            "skill_version": contract.version,
             "user_id": _dev_user(db),
         },
     )
     db.commit()
-    return {"id": briefing_id, "state": "draft", "skill_id": body.skill_id}
+    return {"id": briefing_id, "state": "draft", "skill_id": body.skill_id, "skill_version": contract.version}
 
 
 @app.get("/api/v1/briefings")
 def list_briefings(db: Session = Depends(get_db)):
+    _require_dev_auth()
     rows = db.execute(
         text(
             """
@@ -141,6 +155,7 @@ def list_briefings(db: Session = Depends(get_db)):
 
 @app.get("/api/v1/briefings/{briefing_id}")
 def get_briefing(briefing_id: str, db: Session = Depends(get_db)):
+    _require_dev_auth()
     row = db.execute(
         text("SELECT id, title, state, skill_id, language FROM briefings WHERE id = :id"),
         {"id": briefing_id},
@@ -172,14 +187,14 @@ async def upload_asset(
     if not is_allowed_kind(kind):
         raise HTTPException(400, f"unknown asset kind {kind}")
     try:
-        data = await read_limited(file.read)
+        size, digest = await hash_limited(file.read)
     except UploadTooLarge as exc:
         raise HTTPException(413, str(exc))
-    digest = hashlib.sha256(data).hexdigest()
+    await file.seek(0)
     asset_id = new_id()
     safe_name = sanitize_filename(file.filename)
     key = f"briefings/{briefing_id}/{asset_id}/{safe_name}"
-    put_bytes(key, data, file.content_type or "application/octet-stream")
+    put_fileobj(key, file.file, file.content_type or "application/octet-stream")
     db.execute(
         text(
             """
@@ -195,13 +210,13 @@ async def upload_asset(
             "kind": kind,
             "filename": safe_name,
             "mime": file.content_type or "application/octet-stream",
-            "bytes": len(data),
+            "bytes": size,
             "sha256": digest,
             "key": key,
         },
     )
     db.commit()
-    return {"id": asset_id, "sha256": digest, "bytes": len(data)}
+    return {"id": asset_id, "sha256": digest, "bytes": size}
 
 
 @app.post("/api/v1/briefings/{briefing_id}/jobs")
@@ -230,6 +245,7 @@ def start_job(briefing_id: str, body: JobIn, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/jobs/{job_id}")
 def get_job(job_id: str, db: Session = Depends(get_db)):
+    _require_dev_auth()
     row = db.execute(
         text("SELECT id, briefing_id, type, state, error FROM jobs WHERE id = :id"),
         {"id": job_id},
@@ -241,6 +257,7 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/briefings/{briefing_id}/script")
 def get_script(briefing_id: str, db: Session = Depends(get_db)):
+    _require_dev_auth()
     row = db.execute(
         text(
             """
@@ -286,6 +303,7 @@ def accept_script(briefing_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/assets/{asset_id}/content")
 def asset_content(asset_id: str, db: Session = Depends(get_db)):
+    _require_dev_auth()
     row = db.execute(
         text("SELECT minio_key FROM source_assets WHERE id = :id"),
         {"id": asset_id},
@@ -297,6 +315,7 @@ def asset_content(asset_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/briefings/{briefing_id}/artifacts")
 def list_artifacts(briefing_id: str, db: Session = Depends(get_db)):
+    _require_dev_auth()
     rows = db.execute(
         text(
             "SELECT id, kind, bytes, sha256, created_at FROM artifacts "
@@ -309,6 +328,7 @@ def list_artifacts(briefing_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/artifacts/{artifact_id}/content")
 def artifact_content(artifact_id: str, db: Session = Depends(get_db)):
+    _require_dev_auth()
     row = db.execute(
         text("SELECT minio_key FROM artifacts WHERE id = :id"),
         {"id": artifact_id},
@@ -320,6 +340,7 @@ def artifact_content(artifact_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/artifacts/{artifact_id}/file")
 def artifact_file(artifact_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_dev_auth()
     """Stream an artifact from this origin so the film can seek and the deck can be framed."""
     row = db.execute(
         text("SELECT minio_key FROM artifacts WHERE id = :id"),
@@ -368,6 +389,7 @@ def help_chat(body: ChatIn):
 
 @app.post("/api/v1/briefings/{briefing_id}/chat")
 def briefing_chat(briefing_id: str, body: ChatIn, db: Session = Depends(get_db)):
+    _require_dev_auth()
     from grounded.chat import answer_grounded
 
     question = (body.question or "").strip()
