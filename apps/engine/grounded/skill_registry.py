@@ -28,6 +28,7 @@ class SkillContract:
     job: str
     path: Path
     crafts: tuple[str, ...] = ()
+    contract_text: str = ""
 
     def provenance(self) -> dict[str, object]:
         return {
@@ -35,6 +36,7 @@ class SkillContract:
             "skill_version": self.version,
             "skill_path": self.path.as_posix(),
             "crafts": list(self.crafts),
+            "contract_text": self.contract_text,
         }
 
 
@@ -123,6 +125,7 @@ def parse_contract(path: str | Path) -> SkillContract:
         job=fields.get("job", ""),
         path=source,
         crafts=tuple(dict.fromkeys(crafts)),
+        contract_text=text,
     )
 
 
@@ -139,4 +142,5 @@ def execution_provenance(skill_id: str, root: str | Path | None = None) -> dict[
     return {
         **skill.provenance(),
         "craft_versions": {craft.id: craft.version for craft in crafts},
+        "craft_contracts": {craft.id: craft.contract_text for craft in crafts},
     }
