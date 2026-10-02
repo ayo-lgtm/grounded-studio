@@ -63,9 +63,36 @@ def room():
     return HTMLResponse(_ROOM, headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/v1/skills")
+def list_skills():
+    from grounded.skill_registry import SkillRegistryError, catalog
+
+    try:
+        contracts = catalog()
+    except SkillRegistryError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return {
+        "skills": [
+            {
+                "id": contract.id,
+                "version": contract.version,
+                "job": contract.job,
+                "crafts": list(contract.crafts),
+            }
+            for contract in contracts
+        ]
+    }
+
+
 @app.post("/api/v1/briefings")
 def create_briefing(body: BriefingIn, db: Session = Depends(get_db)):
+    from grounded.skill_registry import SkillRegistryError, resolve_skill
+
     _require_dev_auth()
+    try:
+        contract, _crafts = resolve_skill(body.skill_id)
+    except SkillRegistryError as exc:
+        raise HTTPException(400, str(exc)) from exc
     briefing_id = new_id()
     project_id = body.project_id or _ensure_dev_project(db)
     db.execute(
@@ -74,7 +101,7 @@ def create_briefing(body: BriefingIn, db: Session = Depends(get_db)):
             INSERT INTO briefings
               (id, project_id, title, state, skill_id, skill_version, language, created_by)
             VALUES
-              (:id, :project_id, :title, 'draft', :skill_id, '1.0.0', 'en', :user_id)
+              (:id, :project_id, :title, 'draft', :skill_id, :skill_version, 'en', :user_id)
             """
         ),
         {
@@ -82,11 +109,17 @@ def create_briefing(body: BriefingIn, db: Session = Depends(get_db)):
             "project_id": project_id,
             "title": body.title,
             "skill_id": body.skill_id,
+            "skill_version": contract.version,
             "user_id": _dev_user(db),
         },
     )
     db.commit()
-    return {"id": briefing_id, "state": "draft", "skill_id": body.skill_id}
+    return {
+        "id": briefing_id,
+        "state": "draft",
+        "skill_id": body.skill_id,
+        "skill_version": contract.version,
+    }
 
 
 @app.get("/api/v1/briefings")
