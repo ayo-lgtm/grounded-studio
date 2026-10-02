@@ -1,5 +1,6 @@
 # skill: launch-announcement
 version: 1.0.0
+offline: true
 job: Turn a launch or announcement writeup into a clean internal presentation.
 
 inputs_required:
@@ -24,6 +25,7 @@ visual_grammar:
   - chrome comes from house.py
 
 forbidden:
+  - any external HTTP API, SaaS endpoint, cloud ASR, cloud TTS, cloud LLM, cloud embeddings, or cloud render; no public internet egress
   - new dates, pricing, or promises
   - translating a "maybe" in the doc into a commitment
 

@@ -1,5 +1,6 @@
 # skill: product-walkthrough
 version: 1.0.0
+offline: true
 job: Turn a real product recording into a chaptered walkthrough that stays faithful to the screen and the spoken words.
 
 inputs_required:
@@ -24,6 +25,7 @@ visual_grammar:
   - chrome comes from house.py, not from this skill
 
 forbidden:
+  - any external HTTP API, SaaS endpoint, cloud ASR, cloud TTS, cloud LLM, cloud embeddings, or cloud render; no public internet egress
   - naming buttons, menus, or features not in the transcript or attached docs
   - inventing keyboard shortcuts
   - cinematic B-roll

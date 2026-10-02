@@ -1,5 +1,6 @@
 # skill: weekly-ops-review
 version: 1.0.0
+offline: true
 job: Recurring numeric briefing from a workbook that matches a saved template.
 
 inputs_required:
@@ -22,6 +23,7 @@ visual_grammar:
   - chrome comes from house.py
 
 forbidden:
+  - any external HTTP API, SaaS endpoint, cloud ASR, cloud TTS, cloud LLM, cloud embeddings, or cloud render; no public internet egress
   - interpolating missing weeks
   - using last week's value when this week's cell is empty
   - "we should" unless a text cell says so

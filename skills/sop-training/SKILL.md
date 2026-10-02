@@ -1,5 +1,6 @@
 # skill: sop-training
 version: 1.0.0
+offline: true
 job: Produce a followable SOP from a recording and/or document.
 
 inputs_required: []
@@ -23,6 +24,7 @@ visual_grammar:
   - one numbered step per spoken line; guide.md is that list
 
 forbidden:
+  - any external HTTP API, SaaS endpoint, cloud ASR, cloud TTS, cloud LLM, cloud embeddings, or cloud render; no public internet egress
   - adding safety or compliance steps that are not in the source
   - merging two steps into one if the source numbered them separately
 
