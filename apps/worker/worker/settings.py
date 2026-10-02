@@ -16,11 +16,8 @@ class Settings(BaseSettings):
     whisper_cache: str = "/opt/whisper"
     piper_bin: str = ""
     piper_model: str = ""
-    aws_region: str = "us-east-1"
     trans_provider: str = "local"
-    trans_s3_bucket: str = ""
     trans_language: str = "en-US"
-    trans_timeout_s: int = 1800
     narration_provider: str = "local"
     artifact_dir: str = "out/jobs"
 

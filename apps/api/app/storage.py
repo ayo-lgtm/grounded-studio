@@ -56,6 +56,17 @@ def put_bytes(key: str, data: bytes, content_type: str, client=None) -> None:
     )
 
 
+def put_fileobj(key: str, fileobj, content_type: str, client=None) -> None:
+    """Stream a seekable upload to internal object storage."""
+    ensure_bucket(client)
+    _client(client).upload_fileobj(
+        fileobj,
+        settings.minio_bucket,
+        key,
+        ExtraArgs={"ContentType": content_type},
+    )
+
+
 def signed_url(key: str, expires: int = 300, client=None) -> str:
     return _client(client).generate_presigned_url(
         "get_object",

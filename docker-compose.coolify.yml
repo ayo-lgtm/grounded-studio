@@ -49,8 +49,10 @@ services:
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-grounded}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in Coolify}
-      EGRESS_MODE: ${EGRESS_MODE:-offline}
+      EGRESS_MODE: offline
       MODEL_BASE_URL: ${MODEL_BASE_URL:-}
+      GROUND_ALLOW_PUBLIC_EGRESS: "false"
+      DEV_BYPASS_AUTH: "false"
     expose:
       - "8000"
     depends_on:
@@ -73,8 +75,9 @@ services:
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-grounded}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in Coolify}
-      EGRESS_MODE: ${EGRESS_MODE:-offline}
+      EGRESS_MODE: offline
       MODEL_BASE_URL: ${MODEL_BASE_URL:-}
+      GROUND_ALLOW_PUBLIC_EGRESS: "false"
       TRANS_PROVIDER: ${TRANS_PROVIDER:-local}
       TRANS_LANGUAGE: ${TRANS_LANGUAGE:-en-US}
       NARRATION_PROVIDER: ${NARRATION_PROVIDER:-local}

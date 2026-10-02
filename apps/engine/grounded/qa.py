@@ -96,9 +96,28 @@ def _number_errors(beat: dict[str, Any], cells: dict[tuple[str, str], Any] | Non
             errors.append(f"beat {beat.get('ord')} cited empty cell {sheet}!{addr}")
             continue
         if claim.get("in_text"):
-            if str(int(claim["value"])) not in str(cell):
+            token = str(claim["value"])
+            if float(claim["value"]).is_integer():
+                token = str(int(claim["value"]))
+            if token not in str(cell):
                 errors.append(f"beat {beat.get('ord')} number {claim['value']} is not in {sheet}!{addr}")
         elif claim.get("derived"):
+            formula = claim.get("formula")
+            operands = claim.get("operands") or []
+            if not formula:
+                errors.append(f"beat {beat.get('ord')} derived claim has no formula")
+            if len(operands) < 2:
+                errors.append(f"beat {beat.get('ord')} derived claim has incomplete operands")
+            for operand in operands:
+                key = (operand.get("sheet"), operand.get("addr"))
+                if key not in cited:
+                    errors.append(
+                        f"beat {beat.get('ord')} derived operand {key[0]}!{key[1]} is not cited"
+                    )
+                if cells is not None and key not in cells:
+                    errors.append(
+                        f"beat {beat.get('ord')} derived operand {key[0]}!{key[1]} is missing"
+                    )
             continue
         else:
             expected = claim.get("cell", claim["value"])
@@ -118,6 +137,12 @@ def _displayed(beat: dict[str, Any]) -> list[str]:
             strings.append(value)
     for row in slots.get("rows") or []:
         for value in row.values():
+            if isinstance(value, str):
+                strings.append(value)
+    visual = beat.get("visual") or {}
+    for row in visual.get("rows") or []:
+        for cell in row:
+            value = cell.get("display") if isinstance(cell, dict) else None
             if isinstance(value, str):
                 strings.append(value)
     return strings

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .layouts import SKILL_RENDERER
-from .numbers import format_pct, format_points, format_usd, format_usd_full
+from .numbers import format_pct, format_points, format_value
 
 
 class CompileError(Exception):
@@ -29,6 +29,11 @@ def cell_index(pack: dict[str, Any]) -> dict[tuple[str, str], Any]:
     for row in pack.get("movers") or []:
         cells[(row["sheet"], row["addr"])] = row.get("value")
         cells[(row["sheet"], row["prior_addr"])] = row.get("prior")
+    for source in pack.get("source_ranges") or []:
+        for row in source.get("rows") or []:
+            for cell in row:
+                if cell.get("addr"):
+                    cells[(source["sheet"], cell["addr"])] = cell.get("value") if cell.get("value") is not None else cell.get("display")
     for note in list(pack.get("risks") or []) + list(pack.get("asks") or []):
         cells[(note["sheet"], note["addr"])] = note.get("text")
     return cells
@@ -71,6 +76,9 @@ def compile_workbook(pack: dict[str, Any], skill_id: str = "weekly-ops-review") 
     movers = list(pack.get("movers") or [])
     if movers:
         beats.append(_movers_beat(movers))
+
+    for source in pack.get("source_ranges") or []:
+        beats.append(_source_range_beat(source))
 
     for note in pack.get("risks") or []:
         if note.get("text"):
@@ -141,18 +149,23 @@ def _kpi_beat(kpi: dict[str, Any]) -> dict[str, Any]:
     label = kpi["label"]
     sheet = kpi["sheet"]
     addr = kpi["addr"]
+    unit = kpi.get("unit") or "number"
     target = kpi.get("target")
     target_sheet = kpi.get("target_sheet") or sheet
     target_addr = kpi.get("target_addr")
     cites = [_workbook(sheet, addr)]
-    if kpi["unit"] == "pct":
-        actual_txt = kpi.get("display") or format_pct(kpi["value"])
-        actual_claim = {"value": round(kpi["value"] * 100, 1), "cell": kpi["value"], "unit": "pct", "sheet": sheet, "addr": addr}
-    else:
-        actual_txt = kpi.get("display") or format_usd(kpi["value"])
-        actual_claim = {"value": kpi["value"], "sheet": sheet, "addr": addr}
 
+    actual_txt = kpi.get("display") or format_value(kpi["value"], unit)
+    actual_claim = {
+        "value": round(kpi["value"] * 100, 1) if unit == "pct" else kpi["value"],
+        "cell": kpi["value"],
+        "unit": unit,
+        "sheet": sheet,
+        "addr": addr,
+        "formula": kpi.get("formula"),
+    }
     claims = [actual_claim]
+
     if target is None or not target_addr:
         return {
             "kind": "kpi",
@@ -164,43 +177,61 @@ def _kpi_beat(kpi: dict[str, Any]) -> dict[str, Any]:
         }
 
     cites.append(_workbook(target_sheet, target_addr))
-    if kpi["unit"] == "pct":
-        target_txt = kpi.get("target_display") or format_pct(target)
-        target_claim = {
-            "value": round(target * 100, 1),
-            "cell": target,
-            "unit": "pct",
-            "sheet": target_sheet,
-            "addr": target_addr,
-        }
-        delta_points = (kpi["value"] - target) * 100
-        delta_value = round(delta_points, 1)
-        delta_txt = format_points(abs(delta_points))
-        relation = _relation(kpi["value"], target)
+    target_txt = kpi.get("target_display") or format_value(target, unit)
+    target_claim = {
+        "value": round(target * 100, 1) if unit == "pct" else target,
+        "cell": target,
+        "unit": unit,
+        "sheet": target_sheet,
+        "addr": target_addr,
+        "formula": kpi.get("target_formula"),
+    }
+    relation = _relation(kpi["value"], target)
+    extra_claims: list[dict[str, Any]] = []
+
+    if unit == "pct":
+        delta = (kpi["value"] - target) * 100
         if relation == "at":
             text = f"{label} is {actual_txt}, at the {target_txt} target."
             delta_line = f"At the {target_txt} target"
-            extra_claims = []
         else:
             word = "above" if relation == "above" else "below"
-            text = f"{label} is {actual_txt}, {delta_txt} points {word} the {target_txt} target."
-            delta_line = f"{delta_txt} points {word}"
-            extra_claims = [{"value": abs(delta_value), "sheet": sheet, "addr": addr, "derived": True}]
+            delta_txt = format_points(abs(delta))
+            text = f"{label} is {actual_txt}, {delta_txt} percentage points {word} the {target_txt} target."
+            delta_line = f"{delta_txt} percentage points {word}"
+            extra_claims.append({
+                "value": abs(round(delta, 1)),
+                "sheet": sheet,
+                "addr": addr,
+                "derived": True,
+                "formula": "(actual - target) * 100",
+                "operands": [
+                    {"sheet": sheet, "addr": addr},
+                    {"sheet": target_sheet, "addr": target_addr},
+                ],
+            })
     else:
-        target_txt = kpi.get("target_display") or format_usd(target)
-        target_claim = {"value": target, "sheet": target_sheet, "addr": target_addr}
         delta = kpi["value"] - target
-        relation = _relation(kpi["value"], target)
         if relation == "at":
             text = f"{label} is {actual_txt}, at the {target_txt} target."
             delta_line = f"At the {target_txt} target"
-            extra_claims = []
         else:
             word = "above" if relation == "above" else "below"
-            delta_txt = format_usd(abs(delta))
+            delta_txt = format_value(abs(delta), unit)
             text = f"{label} is {actual_txt}, {delta_txt} {word} the {target_txt} target."
             delta_line = f"{delta_txt} {word}"
-            extra_claims = [{"value": abs(delta), "sheet": sheet, "addr": addr, "derived": True}]
+            extra_claims.append({
+                "value": abs(delta),
+                "sheet": sheet,
+                "addr": addr,
+                "derived": True,
+                "formula": "actual - target",
+                "operands": [
+                    {"sheet": sheet, "addr": addr},
+                    {"sheet": target_sheet, "addr": target_addr},
+                ],
+            })
+
     claims.extend([target_claim, *extra_claims])
     return {
         "kind": "kpi",
@@ -217,35 +248,72 @@ def _kpi_beat(kpi: dict[str, Any]) -> dict[str, Any]:
         "citations": cites,
     }
 
-
 def _movers_beat(rows: list[dict[str, Any]]) -> dict[str, Any]:
     scored = [(row, row["value"] - row["prior"]) for row in rows]
-    lead, lead_delta = max(scored, key=lambda item: abs(item[1]))
-    if lead_delta == 0:
-        text = "No line moved versus last week."
-        claims: list[dict[str, Any]] = []
+    units = {row.get("unit") or "number" for row, _delta in scored}
+    claims: list[dict[str, Any]] = []
+    if len(units) > 1:
+        text = "Selected movements are shown by source unit; cross-unit movements are not ranked."
     else:
-        word = "up" if lead_delta > 0 else "down"
-        text = f"Largest move is {lead['label']}, {word} {format_usd(abs(lead_delta))} from last week."
-        claims = [{"value": abs(lead_delta), "sheet": lead["sheet"], "addr": lead["addr"], "derived": True}]
+        lead, lead_delta = max(scored, key=lambda item: abs(item[1]))
+        unit = lead.get("unit") or "number"
+        if lead_delta == 0:
+            text = "No selected line moved versus the prior period."
+        else:
+            word = "up" if lead_delta > 0 else "down"
+            if unit == "pct":
+                delta_text = f"{abs(lead_delta) * 100:.1f} percentage points"
+                claim_value = abs(round(lead_delta * 100, 1))
+            else:
+                delta_text = format_value(abs(lead_delta), unit)
+                claim_value = abs(lead_delta)
+            text = f"Largest selected move is {lead['label']}, {word} {delta_text} from the prior period."
+            claims.append({"value": claim_value, "sheet": lead["sheet"], "addr": lead["addr"], "derived": True})
 
     table = []
     cites = []
     for row, delta in scored:
+        row_unit = row.get("unit") or "number"
         cites.append(_workbook(row["sheet"], row["addr"]))
         cites.append(_workbook(row["sheet"], row["prior_addr"]))
-        claims.append({"value": row["value"], "sheet": row["sheet"], "addr": row["addr"]})
-        claims.append({"value": row["prior"], "sheet": row["sheet"], "addr": row["prior_addr"]})
+        current_claim = round(row["value"] * 100, 1) if row_unit == "pct" else row["value"]
+        prior_claim = round(row["prior"] * 100, 1) if row_unit == "pct" else row["prior"]
+        claims.append({"value": current_claim, "cell": row["value"], "unit": row_unit, "sheet": row["sheet"], "addr": row["addr"], "formula": row.get("formula")})
+        claims.append({"value": prior_claim, "cell": row["prior"], "unit": row_unit, "sheet": row["sheet"], "addr": row["prior_addr"], "formula": row.get("prior_formula")})
         if delta == 0:
             delta_txt = "Flat"
+        elif row_unit == "pct":
+            delta_txt = f"{delta * 100:+.1f} pp"
+            claims.append({
+                "value": round(delta * 100, 1),
+                "sheet": row["sheet"],
+                "addr": row["addr"],
+                "derived": True,
+                "formula": "(actual - prior) * 100",
+                "operands": [
+                    {"sheet": row["sheet"], "addr": row["addr"]},
+                    {"sheet": row["sheet"], "addr": row["prior_addr"]},
+                ],
+            })
         else:
-            delta_txt = format_usd_full(delta)
-            claims.append({"value": delta, "sheet": row["sheet"], "addr": row["addr"], "derived": True})
+            sign = "+" if delta > 0 else "-"
+            delta_txt = sign + format_value(abs(delta), row_unit, full=True)
+            claims.append({
+                "value": delta,
+                "sheet": row["sheet"],
+                "addr": row["addr"],
+                "derived": True,
+                "formula": "actual - prior",
+                "operands": [
+                    {"sheet": row["sheet"], "addr": row["addr"]},
+                    {"sheet": row["sheet"], "addr": row["prior_addr"]},
+                ],
+            })
         table.append(
             {
                 "line": row["label"],
-                "this_week": row.get("display") or format_usd_full(row["value"]),
-                "last_week": row.get("prior_display") or format_usd_full(row["prior"]),
+                "this_week": row.get("display") or format_value(row["value"], row_unit, full=True),
+                "last_week": row.get("prior_display") or format_value(row["prior"], row_unit, full=True),
                 "delta": delta_txt,
             }
         )
@@ -254,6 +322,54 @@ def _movers_beat(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "layout": "movers",
         "text": text,
         "slots": {"eyebrow": "Movers", "rows": table},
+        "claims": claims,
+        "citations": cites,
+    }
+
+
+def _source_range_beat(source: dict[str, Any]) -> dict[str, Any]:
+    claims: list[dict[str, Any]] = []
+    cites: list[dict[str, str]] = []
+    rows = source.get("rows") or []
+    for row in rows:
+        for cell in row:
+            addr = cell.get("addr")
+            display = str(cell.get("display") or "")
+            if not addr or not display:
+                continue
+            cites.append(_workbook(source["sheet"], addr))
+            value = cell.get("value")
+            if isinstance(value, (int, float)):
+                unit = cell.get("unit") or "number"
+                claims.append(
+                    {
+                        "value": round(value * 100, 1) if unit == "pct" else value,
+                        "cell": value,
+                        "unit": unit,
+                        "sheet": source["sheet"],
+                        "addr": addr,
+                    }
+                )
+            else:
+                from .numbers import parse_numbers
+
+                for token in parse_numbers(display):
+                    claims.append(
+                        {
+                            "value": token,
+                            "sheet": source["sheet"],
+                            "addr": addr,
+                            "in_text": True,
+                        }
+                    )
+    if not cites:
+        raise CompileError([f"source range {source.get('sheet')} has no displayable cells"])
+    return {
+        "kind": "source",
+        "layout": "source-range",
+        "text": "Source workbook data.",
+        "slots": {"eyebrow": "Source data"},
+        "visual": {"range": source.get("range"), "rows": rows},
         "claims": claims,
         "citations": cites,
     }
