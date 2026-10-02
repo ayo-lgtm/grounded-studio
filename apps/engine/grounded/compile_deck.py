@@ -162,6 +162,7 @@ def _kpi_beat(kpi: dict[str, Any]) -> dict[str, Any]:
         "unit": unit,
         "sheet": sheet,
         "addr": addr,
+        "formula": kpi.get("formula"),
     }
     claims = [actual_claim]
 
@@ -183,6 +184,7 @@ def _kpi_beat(kpi: dict[str, Any]) -> dict[str, Any]:
         "unit": unit,
         "sheet": target_sheet,
         "addr": target_addr,
+        "formula": kpi.get("target_formula"),
     }
     relation = _relation(kpi["value"], target)
     extra_claims: list[dict[str, Any]] = []
@@ -197,7 +199,17 @@ def _kpi_beat(kpi: dict[str, Any]) -> dict[str, Any]:
             delta_txt = format_points(abs(delta))
             text = f"{label} is {actual_txt}, {delta_txt} percentage points {word} the {target_txt} target."
             delta_line = f"{delta_txt} percentage points {word}"
-            extra_claims.append({"value": abs(round(delta, 1)), "sheet": sheet, "addr": addr, "derived": True})
+            extra_claims.append({
+                "value": abs(round(delta, 1)),
+                "sheet": sheet,
+                "addr": addr,
+                "derived": True,
+                "formula": "(actual - target) * 100",
+                "operands": [
+                    {"sheet": sheet, "addr": addr},
+                    {"sheet": target_sheet, "addr": target_addr},
+                ],
+            })
     else:
         delta = kpi["value"] - target
         if relation == "at":
@@ -208,7 +220,17 @@ def _kpi_beat(kpi: dict[str, Any]) -> dict[str, Any]:
             delta_txt = format_value(abs(delta), unit)
             text = f"{label} is {actual_txt}, {delta_txt} {word} the {target_txt} target."
             delta_line = f"{delta_txt} {word}"
-            extra_claims.append({"value": abs(delta), "sheet": sheet, "addr": addr, "derived": True})
+            extra_claims.append({
+                "value": abs(delta),
+                "sheet": sheet,
+                "addr": addr,
+                "derived": True,
+                "formula": "actual - target",
+                "operands": [
+                    {"sheet": sheet, "addr": addr},
+                    {"sheet": target_sheet, "addr": target_addr},
+                ],
+            })
 
     claims.extend([target_claim, *extra_claims])
     return {
@@ -256,17 +278,37 @@ def _movers_beat(rows: list[dict[str, Any]]) -> dict[str, Any]:
         cites.append(_workbook(row["sheet"], row["prior_addr"]))
         current_claim = round(row["value"] * 100, 1) if row_unit == "pct" else row["value"]
         prior_claim = round(row["prior"] * 100, 1) if row_unit == "pct" else row["prior"]
-        claims.append({"value": current_claim, "cell": row["value"], "unit": row_unit, "sheet": row["sheet"], "addr": row["addr"]})
-        claims.append({"value": prior_claim, "cell": row["prior"], "unit": row_unit, "sheet": row["sheet"], "addr": row["prior_addr"]})
+        claims.append({"value": current_claim, "cell": row["value"], "unit": row_unit, "sheet": row["sheet"], "addr": row["addr"], "formula": row.get("formula")})
+        claims.append({"value": prior_claim, "cell": row["prior"], "unit": row_unit, "sheet": row["sheet"], "addr": row["prior_addr"], "formula": row.get("prior_formula")})
         if delta == 0:
             delta_txt = "Flat"
         elif row_unit == "pct":
             delta_txt = f"{delta * 100:+.1f} pp"
-            claims.append({"value": round(delta * 100, 1), "sheet": row["sheet"], "addr": row["addr"], "derived": True})
+            claims.append({
+                "value": round(delta * 100, 1),
+                "sheet": row["sheet"],
+                "addr": row["addr"],
+                "derived": True,
+                "formula": "(actual - prior) * 100",
+                "operands": [
+                    {"sheet": row["sheet"], "addr": row["addr"]},
+                    {"sheet": row["sheet"], "addr": row["prior_addr"]},
+                ],
+            })
         else:
             sign = "+" if delta > 0 else "-"
             delta_txt = sign + format_value(abs(delta), row_unit, full=True)
-            claims.append({"value": delta, "sheet": row["sheet"], "addr": row["addr"], "derived": True})
+            claims.append({
+                "value": delta,
+                "sheet": row["sheet"],
+                "addr": row["addr"],
+                "derived": True,
+                "formula": "actual - prior",
+                "operands": [
+                    {"sheet": row["sheet"], "addr": row["addr"]},
+                    {"sheet": row["sheet"], "addr": row["prior_addr"]},
+                ],
+            })
         table.append(
             {
                 "line": row["label"],
