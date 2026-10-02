@@ -206,7 +206,7 @@ async def upload_asset(
 @app.post("/api/v1/briefings/{briefing_id}/jobs")
 def start_job(briefing_id: str, body: JobIn, db: Session = Depends(get_db)):
     _require_dev_auth()
-    allowed = {"ingest", "transcribe", "compile", "qa", "render", "index"}
+    allowed = {"ingest", "parse", "transcribe", "compile", "qa", "render", "index"}
     if body.type not in allowed:
         raise HTTPException(400, f"unknown job type {body.type}")
     exists = db.execute(text("SELECT 1 FROM briefings WHERE id = :id"), {"id": briefing_id}).first()
