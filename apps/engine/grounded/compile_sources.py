@@ -91,6 +91,8 @@ def compile_uploaded(
 def _attach_provenance(script: dict[str, Any], provenance: dict[str, object]) -> None:
     script["provenance"] = provenance
     script["skill_version"] = str(provenance["skill_version"])
+    script["skill_contract"] = provenance.get("contract_text") or ""
+    script["craft_contracts"] = provenance.get("craft_contracts") or {}
 
 
 def _approve(
