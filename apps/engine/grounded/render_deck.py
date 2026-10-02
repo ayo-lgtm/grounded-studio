@@ -194,6 +194,11 @@ def _step(script: dict[str, Any], beat: dict[str, Any]) -> str:
 
 
 def _cites(beat: dict[str, Any]) -> str:
+    if beat.get("layout") == "source-range":
+        cites = beat.get("citations") or []
+        sheet = cites[0].get("sheet") if cites else ""
+        source_range = (beat.get("visual") or {}).get("range") or ""
+        return f"{sheet}!{source_range}" if sheet and source_range else str(sheet or source_range)
     labels = []
     for cite in beat.get("citations") or []:
         kind = cite.get("kind")
