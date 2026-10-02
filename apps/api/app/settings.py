@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     model_base_url: str = ""
     model_name: str = "local-instruct"
     egress_mode: str = "offline"
-    dev_bypass_auth: bool = True
+    dev_bypass_auth: bool = False
     dev_user_email: str = "dev@internal"
 
     class Config:
