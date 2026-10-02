@@ -1,14 +1,14 @@
-"""Egress policy.
+"""Fail-closed egress policy for Grounded Studio.
 
-Default mode is offline. Public generative APIs are never called.
-A public object-store host is refused unless an operator explicitly
-sets EGRESS_MODE=aws-in-region, and even then chat, TTS, and ASR stay local.
+There is no cloud/provider escape hatch. Runtime data may reach only loopback,
+private RFC1918/link-local addresses, Docker/Kubernetes service names, or
+explicit internal suffixes. Public object stores and managed AI services are
+always refused.
 """
 
 from __future__ import annotations
 
 import ipaddress
-import os
 from urllib.parse import urlparse
 
 PUBLIC_SUFFIXES = (
@@ -31,12 +31,7 @@ PUBLIC_SUFFIXES = (
     "googleapis.com",
 )
 
-# Hosts the offline profile may call. Everything else is public.
-PRIVATE_SUFFIXES = (
-    "railway.internal",
-    "internal",
-    "local",
-)
+PRIVATE_SUFFIXES = ("internal", "local", "corp")
 
 
 class EgressError(Exception):
@@ -44,14 +39,11 @@ class EgressError(Exception):
 
 
 def mode() -> str:
-    raw = (os.environ.get("EGRESS_MODE") or "offline").strip().lower()
-    if raw in {"aws", "aws-in-region", "bedrock"}:
-        return "aws-in-region"
     return "offline"
 
 
 def offline() -> bool:
-    return mode() == "offline"
+    return True
 
 
 def host_of(endpoint: str) -> str:
@@ -69,7 +61,6 @@ def is_private_host(host: str) -> bool:
     if name in {"localhost", "minio", "postgres", "redis", "pgvector", "ollama", "vllm"}:
         return True
     if "." not in name:
-        # Docker/Railway service names on the private network.
         return True
     if any(name == suffix or name.endswith("." + suffix) for suffix in PRIVATE_SUFFIXES):
         return True
@@ -90,54 +81,36 @@ def is_public_host(host: str) -> bool:
 
 
 def assert_object_store(endpoint: str) -> None:
-    """Refuse a public object store while the process is in offline mode."""
-    if not offline():
-        return
     host = host_of(endpoint)
     if is_public_host(host):
         raise EgressError(
-            f"object store host {host or '(missing)'} is public; "
-            "offline mode refuses it. Point MINIO_ENDPOINT at in-network MinIO."
+            f"object store host {host or '(missing)'} is external; "
+            "Grounded Studio requires in-network MinIO/object storage"
         )
 
 
 def assert_private_model(base_url: str) -> str:
-    """Return a private model base URL, or raise. Empty is not configured."""
     url = (base_url or "").strip()
     if not url:
         raise EgressError("no private model endpoint configured")
     host = host_of(url)
     if not is_private_host(host) or is_public_host(host):
-        raise EgressError(f"model host {host or '(missing)'} is not a private endpoint")
+        raise EgressError(f"model host {host or '(missing)'} is external")
     return url.rstrip("/")
 
 
 def object_store_label(endpoint: str) -> str:
-    if is_public_host(host_of(endpoint)):
-        return "public"
-    return "private"
+    return "private" if is_private_host(host_of(endpoint)) else "public-refused"
 
 
 def health_report(db_ok: bool, object_endpoint: str) -> dict[str, object]:
-    """Honest status. ok is false when the database is down or offline mode is blocked."""
     store = object_store_label(object_endpoint)
-    if offline() and store == "public":
-        egress = "blocked"
-        ok = False
-        store_label = "public-refused"
-    elif offline():
-        egress = "offline"
-        ok = bool(db_ok)
-        store_label = "private"
-    else:
-        egress = "aws-in-region"
-        ok = bool(db_ok)
-        store_label = store
+    ok = bool(db_ok) and store == "private"
     return {
         "ok": ok,
-        "egress": egress,
+        "egress": "offline",
         "chat": "retrieval",
         "narration": "local",
         "transcription": "local",
-        "object_store": store_label,
+        "object_store": store,
     }
