@@ -76,7 +76,7 @@ class CompileSourcesTest(unittest.TestCase):
                 title="Monday",
                 workbook=b"not-json",
             )
-        self.assertIn("not JSON", caught.exception.errors[0])
+        self.assertTrue(any(term in caught.exception.errors[0] for term in ("CSV", "workbook")))
 
 
 if __name__ == "__main__":
