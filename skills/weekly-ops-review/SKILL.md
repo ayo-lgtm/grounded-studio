@@ -1,5 +1,6 @@
 # skill: weekly-ops-review
 version: 2.0.0
+offline: true
 job: Recurring operations/business review from a workbook, with cited metrics, defensible variance analysis, and source-faithful visuals.
 
 inputs_required:
@@ -50,6 +51,7 @@ Every required KPI and every selected mover must appear with lineage.
 Do not interpret completeness as reading every workbook cell.
 
 ## Forbidden
+- any external HTTP API, SaaS endpoint, cloud ASR, cloud TTS, cloud LLM, cloud embeddings, or cloud render; no public internet egress
 - interpolating missing weeks
 - silently carrying forward prior values
 - percentage change from a zero denominator
