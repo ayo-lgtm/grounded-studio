@@ -1,4 +1,4 @@
-"""Compile whatever was uploaded: a transcript, a workbook pack, or a document."""
+"""Compile uploaded sources through an executable skill contract."""
 
 from __future__ import annotations
 
@@ -8,10 +8,16 @@ from typing import Any
 from .compile_deck import CompileError, cell_index, compile_document, compile_workbook
 from .compile_recording import compile_recording
 from .director import direct
-from .ingest import IngestError, parse_docx
+from .ingest import IngestError, parse_docx, parse_pdf
+from .ingest_workbook import parse_workbook
+from .skill_registry import SkillRegistryError, execution_provenance
 
 _RECORDING_SKILLS = frozenset({"product-walkthrough", "sop-training", "feature-delta"})
 _DOCUMENT_SKILLS = frozenset({"leadership-brief", "launch-announcement"})
+_WORKBOOK_SKILLS = frozenset(
+    {"weekly-ops-review", "finance-wbr", "half-year-business-review"}
+)
+_MIXED_SKILLS = frozenset({"executive-business-review"})
 
 
 def compile_uploaded(
@@ -22,36 +28,69 @@ def compile_uploaded(
     document: bytes | None = None,
     workbook: bytes | None = None,
 ) -> dict[str, Any]:
-    """Build a cited script from the assets on a briefing.
+    """Build a cited script and persist skill/craft provenance in it."""
+    try:
+        provenance = execution_provenance(skill_id)
+    except SkillRegistryError as exc:
+        raise CompileError([str(exc)]) from exc
 
-    A recording skill with a transcript stays a recording. A workbook JSON
-    pack becomes the weekly deck. A .docx or a JSON block pack becomes a
-    leadership or launch deck. A document uploaded onto the default
-    walkthrough skill is compiled as a leadership brief instead of waiting
-    for a transcript that will never arrive.
-    """
     spoken = [dict(segment) for segment in (segments or []) if (segment.get("text") or "").strip()]
+
     if skill_id in _RECORDING_SKILLS and spoken:
         script = compile_recording(spoken, skill_id=skill_id, title=title or "Walkthrough")
+        _attach_provenance(script, provenance)
         _approve(script)
         return script
-    if skill_id == "weekly-ops-review" or (
+
+    if skill_id in _WORKBOOK_SKILLS or (
         workbook and not document and skill_id not in _DOCUMENT_SKILLS and not spoken
     ):
         if not workbook:
-            raise CompileError(["weekly-ops-review needs a workbook JSON upload"])
-        pack = _json_object(workbook, "workbook")
-        script = compile_workbook(pack, "weekly-ops-review")
+            raise CompileError([f"{skill_id} needs a workbook upload"])
+        pack = parse_workbook(workbook)
+        script = compile_workbook(pack, skill_id)
+        _attach_provenance(script, provenance)
         _approve(script, pack, cell_index(pack))
         return script
+
+    if skill_id in _MIXED_SKILLS:
+        if workbook:
+            pack = parse_workbook(workbook)
+            script = compile_workbook(pack, skill_id)
+            _attach_provenance(script, provenance)
+            if document:
+                script["supporting_document_present"] = True
+            _approve(script, pack, cell_index(pack))
+            return script
+        if document:
+            script = compile_document(_load_document(document), skill_id)
+            _attach_provenance(script, provenance)
+            _approve(script)
+            return script
+        raise CompileError([f"{skill_id} needs a workbook or document upload"])
+
     if document and (skill_id in _DOCUMENT_SKILLS or not spoken):
         doc_skill = skill_id if skill_id in _DOCUMENT_SKILLS else "leadership-brief"
         script = compile_document(_load_document(document), doc_skill)
+        if doc_skill != skill_id:
+            # The user selected a recording-oriented default but uploaded only
+            # a document. Record the actual execution contract, not the UI default.
+            try:
+                provenance = execution_provenance(doc_skill)
+            except SkillRegistryError as exc:
+                raise CompileError([str(exc)]) from exc
+        _attach_provenance(script, provenance)
         _approve(script)
         return script
+
     if skill_id in _RECORDING_SKILLS:
         raise CompileError(["transcribe first"])
-    raise CompileError(["upload a workbook JSON or a .docx before compile"])
+    raise CompileError(["upload a supported workbook, PDF/DOCX, or recording before compile"])
+
+
+def _attach_provenance(script: dict[str, Any], provenance: dict[str, object]) -> None:
+    script["provenance"] = provenance
+    script["skill_version"] = str(provenance["skill_version"])
 
 
 def _approve(
@@ -65,6 +104,11 @@ def _approve(
 
 
 def _load_document(data: bytes) -> dict[str, Any]:
+    if data.startswith(b"%PDF"):
+        try:
+            return parse_pdf(data)
+        except IngestError as exc:
+            raise CompileError([str(exc)]) from exc
     if data[:2] == b"PK":
         try:
             return parse_docx(data)
@@ -72,7 +116,7 @@ def _load_document(data: bytes) -> dict[str, Any]:
             raise CompileError([str(exc)]) from exc
     if data.lstrip()[:1] in {b"{", b"["}:
         return _json_object(data, "document")
-    raise CompileError(["document must be a .docx or a JSON block pack"])
+    raise CompileError(["document must be a PDF, DOCX, or JSON block pack"])
 
 
 def _json_object(data: bytes, label: str) -> dict[str, Any]:
