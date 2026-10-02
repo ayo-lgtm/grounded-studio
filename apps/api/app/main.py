@@ -123,6 +123,7 @@ def create_briefing(body: BriefingIn, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/briefings")
 def list_briefings(db: Session = Depends(get_db)):
+    _require_dev_auth()
     rows = db.execute(
         text(
             """
@@ -138,6 +139,7 @@ def list_briefings(db: Session = Depends(get_db)):
 
 @app.get("/api/v1/briefings/{briefing_id}")
 def get_briefing(briefing_id: str, db: Session = Depends(get_db)):
+    _require_dev_auth()
     row = db.execute(
         text("SELECT id, title, state, skill_id, language FROM briefings WHERE id = :id"),
         {"id": briefing_id},
@@ -227,6 +229,7 @@ def start_job(briefing_id: str, body: JobIn, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/jobs/{job_id}")
 def get_job(job_id: str, db: Session = Depends(get_db)):
+    _require_dev_auth()
     row = db.execute(
         text("SELECT id, briefing_id, type, state, error FROM jobs WHERE id = :id"),
         {"id": job_id},
@@ -238,6 +241,7 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/briefings/{briefing_id}/script")
 def get_script(briefing_id: str, db: Session = Depends(get_db)):
+    _require_dev_auth()
     row = db.execute(
         text(
             """
@@ -283,6 +287,7 @@ def accept_script(briefing_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/assets/{asset_id}/content")
 def asset_content(asset_id: str, db: Session = Depends(get_db)):
+    _require_dev_auth()
     row = db.execute(
         text("SELECT minio_key FROM source_assets WHERE id = :id"),
         {"id": asset_id},
@@ -294,6 +299,7 @@ def asset_content(asset_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/briefings/{briefing_id}/artifacts")
 def list_artifacts(briefing_id: str, db: Session = Depends(get_db)):
+    _require_dev_auth()
     rows = db.execute(
         text(
             "SELECT id, kind, bytes, sha256, created_at FROM artifacts "
@@ -306,6 +312,7 @@ def list_artifacts(briefing_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/artifacts/{artifact_id}/content")
 def artifact_content(artifact_id: str, db: Session = Depends(get_db)):
+    _require_dev_auth()
     row = db.execute(
         text("SELECT minio_key FROM artifacts WHERE id = :id"),
         {"id": artifact_id},
@@ -317,6 +324,7 @@ def artifact_content(artifact_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/artifacts/{artifact_id}/file")
 def artifact_file(artifact_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_dev_auth()
     """Stream an artifact from this origin so the film can seek and the deck can be framed."""
     row = db.execute(
         text("SELECT minio_key FROM artifacts WHERE id = :id"),
@@ -343,6 +351,7 @@ def artifact_file(artifact_id: str, request: Request, db: Session = Depends(get_
 
 @app.post("/api/v1/briefings/{briefing_id}/chat")
 def briefing_chat(briefing_id: str, body: ChatIn, db: Session = Depends(get_db)):
+    _require_dev_auth()
     from grounded.chat import answer_with_claude
 
     question = (body.question or "").strip()
