@@ -367,7 +367,7 @@ def _source_range_beat(source: dict[str, Any]) -> dict[str, Any]:
     return {
         "kind": "source",
         "layout": "source-range",
-        "text": f"Source data from {source['sheet']}.",
+        "text": "Source workbook data.",
         "slots": {"eyebrow": "Source data"},
         "visual": {"range": source.get("range"), "rows": rows},
         "claims": claims,
