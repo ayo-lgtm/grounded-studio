@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import uuid
 from pathlib import Path
@@ -19,8 +18,8 @@ from .db import get_db, ping
 from .queue import enqueue, new_id
 from .ranges import content_type, slice_body
 from .settings import settings
-from .storage import put_bytes, read_bytes, signed_url
-from .validation import UploadTooLarge, is_allowed_kind, read_limited, sanitize_filename
+from .storage import put_fileobj, read_bytes, signed_url
+from .validation import UploadTooLarge, hash_limited, is_allowed_kind, sanitize_filename
 
 _ROOM = (Path(__file__).resolve().parent / "room.html").read_text(encoding="utf-8")
 
@@ -170,14 +169,14 @@ async def upload_asset(
     if not is_allowed_kind(kind):
         raise HTTPException(400, f"unknown asset kind {kind}")
     try:
-        data = await read_limited(file.read)
+        size, digest = await hash_limited(file.read)
     except UploadTooLarge as exc:
         raise HTTPException(413, str(exc))
-    digest = hashlib.sha256(data).hexdigest()
+    await file.seek(0)
     asset_id = new_id()
     safe_name = sanitize_filename(file.filename)
     key = f"briefings/{briefing_id}/{asset_id}/{safe_name}"
-    put_bytes(key, data, file.content_type or "application/octet-stream")
+    put_fileobj(key, file.file, file.content_type or "application/octet-stream")
     db.execute(
         text(
             """
@@ -193,13 +192,13 @@ async def upload_asset(
             "kind": kind,
             "filename": safe_name,
             "mime": file.content_type or "application/octet-stream",
-            "bytes": len(data),
+            "bytes": size,
             "sha256": digest,
             "key": key,
         },
     )
     db.commit()
-    return {"id": asset_id, "sha256": digest, "bytes": len(data)}
+    return {"id": asset_id, "sha256": digest, "bytes": size}
 
 
 @app.post("/api/v1/briefings/{briefing_id}/jobs")
