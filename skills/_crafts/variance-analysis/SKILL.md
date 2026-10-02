@@ -1,5 +1,6 @@
 # craft: variance-analysis
 version: 1.0.0
+offline: true
 used_by: weekly-ops-review, finance-wbr, half-year-business-review, executive-business-review
 
 job: Compute and rank defensible changes without confusing arithmetic with explanation.
