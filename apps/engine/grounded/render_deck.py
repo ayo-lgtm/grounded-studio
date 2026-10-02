@@ -10,6 +10,9 @@ from .house import css
 
 _EYEBROW = {
     "weekly-ops-review": "Weekly operating review",
+    "finance-wbr": "Finance weekly business review",
+    "half-year-business-review": "Half-year business review",
+    "executive-business-review": "Executive business review",
     "leadership-brief": "Leadership brief",
     "launch-announcement": "Launch",
     "sop-training": "Procedure",
