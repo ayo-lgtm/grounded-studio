@@ -12,8 +12,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-_ID = re.compile(r"^#\\s+(skill|craft):\\s*([a-z0-9][a-z0-9-]*)\\s*$", re.I)
-_FIELD = re.compile(r"^([a-zA-Z_][a-zA-Z0-9_-]*):\\s*(.*?)\\s*$")
+_ID = re.compile(r"^#\s+(skill|craft):\s*([a-z0-9][a-z0-9-]*)\s*$", re.I)
+_FIELD = re.compile(r"^([a-zA-Z_][a-zA-Z0-9_-]*):\s*(.*?)\s*$")
 
 
 class SkillRegistryError(RuntimeError):
@@ -109,7 +109,7 @@ def parse_contract(path: str | Path) -> SkillContract:
             continue
         if stripped.startswith("-") and list_name == "crafts_required":
             item = stripped[1:].strip()
-            craft_id = re.split(r"\\s+when\\s+", item, maxsplit=1, flags=re.I)[0].strip()
+            craft_id = re.split(r"\s+when\s+", item, maxsplit=1, flags=re.I)[0].strip()
             if craft_id:
                 crafts.append(craft_id)
 
