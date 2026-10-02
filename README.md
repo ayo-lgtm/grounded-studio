@@ -90,7 +90,21 @@ Implemented in `apps/`:
   logs; a socket-level egress guard; infra egress-deny for Compose,
   Kubernetes and AWS.
 
-Local demo (synthetic fixtures):
+Run the whole studio on your machine (loopback only, synthetic demo briefings):
+
+```bash
+pip install -r apps/api/requirements.txt -r apps/worker/requirements.txt -r requirements-test.txt
+python scripts/dev_studio.py        # needs postgres + pgvector and redis-server binaries
+# open http://127.0.0.1:8765
+```
+
+It starts a throwaway Postgres and Redis, an S3-compatible store on 127.0.0.1
+standing in for MinIO, the real API (development auth) and worker, and seeds
+three synthetic briefings. For a real deployment use `infra/compose.yaml`
+([docs/18](docs/18-deployment-profiles.md)); the studio UI design is described
+in [docs/19](docs/19-studio-design.md).
+
+Renderer demo (synthetic fixtures):
 
 ```bash
 PYTHONPATH=apps/engine python -m grounded.demo out/demo

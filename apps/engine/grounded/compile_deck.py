@@ -91,7 +91,7 @@ def compile_workbook(pack: dict[str, Any], skill_id: str = "weekly-ops-review") 
                 layout="risk",
                 text=note["text"],
                 slots={"eyebrow": "Risk"},
-                claims=[],
+                claims=_note_claims(note),
                 citations=[_workbook(note["sheet"], note["addr"])],
             )
     for note in pack.get("asks") or []:
@@ -102,7 +102,7 @@ def compile_workbook(pack: dict[str, Any], skill_id: str = "weekly-ops-review") 
                 layout="ask",
                 text=note["text"],
                 slots={"eyebrow": "Ask"},
-                claims=[],
+                claims=_note_claims(note),
                 citations=[_workbook(note["sheet"], note["addr"])],
             )
 
@@ -394,6 +394,14 @@ def _text_claims(text: str, block_id: str) -> list[dict[str, Any]]:
     from .numbers import parse_numbers
 
     return [{"value": number, "block_id": block_id, "in_text": True, "source": text} for number in parse_numbers(text)]
+
+
+def _note_claims(note: dict[str, Any]) -> list[dict[str, Any]]:
+    """Numbers quoted in a workbook note are claims on that note's cell."""
+    return [
+        {"value": number, "sheet": note["sheet"], "addr": note["addr"], "in_text": True}
+        for number in _numbers_in(str(note.get("text") or ""))
+    ]
 
 
 def _numbers_in(text: str) -> list[float]:
