@@ -308,6 +308,18 @@ def _source_range_beat(source: dict[str, Any]) -> dict[str, Any]:
                         "addr": addr,
                     }
                 )
+            else:
+                from .numbers import parse_numbers
+
+                for token in parse_numbers(display):
+                    claims.append(
+                        {
+                            "value": token,
+                            "sheet": source["sheet"],
+                            "addr": addr,
+                            "in_text": True,
+                        }
+                    )
     if not cites:
         raise CompileError([f"source range {source.get('sheet')} has no displayable cells"])
     return {
