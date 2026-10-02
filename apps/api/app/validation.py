@@ -61,3 +61,20 @@ async def read_limited(read_chunk) -> bytes:
             raise UploadTooLarge(f"asset exceeds {MAX_UPLOAD_BYTES} bytes")
         parts.append(chunk)
     return b"".join(parts)
+
+
+async def hash_limited(read_chunk) -> tuple[int, str]:
+    """Stream an upload through SHA-256 without retaining the body in memory."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    total = 0
+    while True:
+        chunk = await read_chunk(_CHUNK_SIZE)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise UploadTooLarge(f"asset exceeds {MAX_UPLOAD_BYTES} bytes")
+        digest.update(chunk)
+    return total, digest.hexdigest()
