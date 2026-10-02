@@ -1,5 +1,6 @@
 # skill: localize
 version: 1.0.0
+offline: true
 job: Create a language sibling of a published briefing without changing facts.
 
 inputs_required:
@@ -13,6 +14,7 @@ story_beats: inherit parent beats in the same order
 visual_grammar: reuse parent video frames or slides; replace captions and TTS only
 
 forbidden:
+  - any external HTTP API, SaaS endpoint, cloud ASR, cloud TTS, cloud LLM, cloud embeddings, or cloud render; no public internet egress
   - changing numbers
   - changing product names that are in the glossary
   - adding beats
