@@ -1,5 +1,6 @@
 # craft: workbook-analysis
 version: 1.0.0
+offline: true
 used_by: weekly-ops-review, finance-wbr, half-year-business-review, executive-business-review
 
 job: Convert a real workbook into a source-faithful semantic metric model before any story is written.
