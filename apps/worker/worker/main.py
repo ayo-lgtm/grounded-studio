@@ -17,9 +17,16 @@ from .settings import settings
 
 ensure_engine()
 
+from grounded.network_policy import assert_private_runtime  # noqa: E402
 from grounded.render_deck import render_deck  # noqa: E402
 from grounded.render_recording import render_edit  # noqa: E402
 
+assert_private_runtime(
+    ("DATABASE_URL", settings.database_url),
+    ("REDIS_URL", settings.redis_url),
+    ("MINIO_ENDPOINT", settings.minio_endpoint),
+    ("MODEL_BASE_URL", settings.model_base_url),
+)
 engine = create_engine(settings.database_url, pool_pre_ping=True)
 Session = sessionmaker(bind=engine)
 QUEUE = "grounded.jobs"
@@ -198,10 +205,12 @@ def transcribe(db, briefing_id: str) -> None:
     ).first()
     if not asset:
         raise RuntimeError("no recording asset")
-    if settings.trans_provider == "transcribe":
-        _transcribe_via_aws(db, briefing_id, asset)
+    if settings.trans_provider == "local":
+        _transcribe_via_local(db, briefing_id, asset)
         return
-    # Stub provider: deterministic placeholder until GPU transcription lands.
+    if settings.trans_provider != "stub":
+        raise RuntimeError("TRANS_PROVIDER must be 'local' or 'stub'; cloud transcription is prohibited")
+    # Stub provider: deterministic placeholder for development only.
     db.execute(text("DELETE FROM transcript_segments WHERE asset_id = :aid"), {"aid": asset[0]})
     db.execute(
         text(
@@ -370,10 +379,17 @@ def render(db, briefing_id: str) -> None:
             raise RuntimeError(rendered["video_error"])
     else:
         render_deck(script, out / "deck.html")
-    if settings.narration_provider == "polly":
+    if settings.narration_provider == "piper":
         from grounded.narrate import narrate_script
 
-        narrate_script(script, out / "voiceover.mp3", region=settings.aws_region)
+        narrate_script(
+            script,
+            out / "voiceover.mp3",
+            piper_bin=settings.piper_bin,
+            model_path=settings.piper_model_path,
+        )
+    elif settings.narration_provider:
+        raise RuntimeError("NARRATION_PROVIDER must be empty or 'piper'; cloud TTS is prohibited")
     _persist_artifacts(db, briefing_id, out)
 
     db.execute(
@@ -534,35 +550,27 @@ def _fetch_source_video(db, briefing_id: str, out: Path):
     )
 
 
-def _transcribe_via_aws(db, briefing_id: str, asset) -> None:
-    from .transcribe_aws import parse_transcribe_json, stage_from_store, transcribe_media
+def _transcribe_via_local(db, briefing_id: str, asset) -> None:
+    """Transcribe the stored recording entirely on the private worker."""
+    from .transcribe_local import transcribe_file
 
-    if not settings.trans_s3_bucket:
-        raise RuntimeError("TRANS_S3_BUCKET is not set")
     asset_id, minio_key = asset[0], asset[1]
-    dest_key = f"transcribe/{briefing_id}/{asset_id}"
-    media_uri = stage_from_store(
-        settings.minio_endpoint,
-        settings.minio_bucket,
-        minio_key,
-        settings.minio_access_key,
-        settings.minio_secret_key,
-        settings.trans_s3_bucket,
-        dest_key,
-        settings.aws_region,
-        settings.minio_region,
-    )
-    job_name = f"grounded-{str(asset_id).replace('-', '')[:24]}-{int(time.time())}"
-    payload = transcribe_media(
-        media_uri,
-        job_name,
-        settings.trans_language,
-        settings.aws_region,
-        settings.trans_timeout_s,
-    )
-    segments = parse_transcribe_json(payload)
-    if not segments:
-        raise RuntimeError("transcribe returned no segments")
+    import tempfile
+
+    handle = tempfile.NamedTemporaryFile(delete=False, suffix=".media")
+    handle.close()
+    media_path = Path(handle.name)
+    try:
+        _download_asset(minio_key, media_path)
+        segments = transcribe_file(
+            media_path,
+            settings.whisper_model_path,
+            device=settings.whisper_device,
+            language=settings.trans_language,
+        )
+    finally:
+        media_path.unlink(missing_ok=True)
+
     db.execute(text("DELETE FROM transcript_segments WHERE asset_id = :aid"), {"aid": asset_id})
     for segment in segments:
         db.execute(
