@@ -22,9 +22,13 @@ export default defineRailway(() => {
   });
 
   const miniodata = volume("miniodata", { region: "sfo", sizeMB: 5120 });
+  // elestio/minio:latest runs as root and can write a fresh Railway volume at
+  // /data. Docker Hub no longer serves minio/minio or bitnami/minio:latest.
+  // Bitnami UID 1001 cannot write root-owned Railway mounts; bitnamilegacy
+  // only boots with the volume omitted. Quay pulls of official MinIO are off.
   const minio = service("minio", {
-    source: image("minio/minio:RELEASE.2025-04-22T22-12-26Z"),
-    start: "minio server /data --console-address :9001",
+    source: image("elestio/minio:latest"),
+    start: "minio server /data --address :9000 --console-address :9001",
     healthcheck: "/minio/health/live",
     volumeMounts: {
       "/data": miniodata,
