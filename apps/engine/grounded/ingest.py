@@ -103,3 +103,61 @@ def _paragraph_text(paragraph: ET.Element) -> str:
         elif node.tag in {_W + "tab", _W + "br"}:
             parts.append(" ")
     return "".join(parts)
+
+
+def parse_pdf(source: str | Path | bytes) -> dict[str, Any]:
+    """Parse a text-bearing PDF into page-grounded document blocks.
+
+    OCR is intentionally not performed here. Scanned/garbled pages fail closed
+    so a future page-image/OCR pipeline cannot be mistaken for extracted truth.
+    """
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:
+        raise IngestError("PDF support requires pypdf") from exc
+
+    try:
+        stream = io.BytesIO(source) if isinstance(source, bytes) else str(source)
+        reader = PdfReader(stream)
+    except Exception as exc:
+        raise IngestError(f"not a readable PDF: {exc}") from exc
+
+    blocks: list[dict[str, Any]] = []
+    title = "PDF Briefing"
+    title_block = "pdf-p1-b1"
+    first_text = ""
+    for page_index, page in enumerate(reader.pages, start=1):
+        try:
+            text = (page.extract_text() or "").strip()
+        except Exception as exc:
+            raise IngestError(f"PDF page {page_index} text extraction failed: {exc}") from exc
+        if not text:
+            continue
+        if not first_text:
+            first_text = text
+        paragraphs = [part.strip() for part in re.split(r"\n\s*\n|(?<=\.)\s*\n", text) if part.strip()]
+        if not paragraphs:
+            paragraphs = [line.strip() for line in text.splitlines() if line.strip()]
+        for block_index, paragraph in enumerate(paragraphs, start=1):
+            block_id = f"pdf-p{page_index}-b{block_index}"
+            blocks.append(
+                {
+                    "id": block_id,
+                    "text": paragraph,
+                    "role": _role(paragraph),
+                    "page": page_index,
+                }
+            )
+    if not blocks:
+        raise IngestError(
+            "PDF has no extractable text; scanned PDFs require the page-image/OCR ingestion path"
+        )
+
+    first_line = next((line.strip() for line in first_text.splitlines() if line.strip()), "")
+    if first_line:
+        title = first_line[:180]
+        title_block = blocks[0]["id"]
+        # Avoid repeating a title-only first block as a slide.
+        if blocks[0]["text"].strip() == first_line:
+            blocks = blocks[1:]
+    return {"title": title, "title_block": title_block, "blocks": blocks}
