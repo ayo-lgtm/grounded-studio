@@ -76,6 +76,10 @@ unless you change it in the UI.
 
 - Data lives in the `pgdata` / `miniodata` Docker volumes on the box.
   Snapshot the VPS before real business data, same as [14](14-aws-claude.md).
+- MinIO is `elestio/minio:latest`. Docker Hub no longer serves `minio/minio`
+  or `bitnami/minio:latest`. The compose command is
+  `minio server /data --address :9000 --console-address :9001`.
+  The Railway volume permission pitfall (Bitnami UID 1001) is in [16](16-railway.md).
 - `DEV_BYPASS_AUTH` defaults to true for the pilot; wire SSO before
   opening the domain beyond the team.
 - If your Coolify version offers a Service-based compose flow instead of
