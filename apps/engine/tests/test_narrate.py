@@ -1,35 +1,8 @@
+import tempfile
 import unittest
 from pathlib import Path
-import tempfile
 
-from grounded.narrate import narrate_script, split_chunks, voice_for
-
-
-class FakeStream:
-    def __init__(self, data):
-        self._data = data
-
-    def read(self):
-        return self._data
-
-
-class FakePolly:
-    def __init__(self, marker=b"AUDIO"):
-        self.marker = marker
-        self.texts = []
-
-    def synthesize_speech(self, **kwargs):
-        self.texts.append(kwargs["Text"])
-        return {"AudioStream": FakeStream(self.marker)}
-
-
-SCRIPT = {
-    "language": "en",
-    "beats": [
-        {"ord": 1, "text": "Open Settings from the left nav."},
-        {"ord": 2, "text": "Choose Billing, then Payment method."},
-    ],
-}
+from grounded.narrate import NarrationError, narrate_script, split_chunks
 
 
 class NarrateTest(unittest.TestCase):
@@ -42,23 +15,24 @@ class NarrateTest(unittest.TestCase):
         self.assertGreater(len(chunks), 1)
         self.assertTrue(all(len(chunk) <= 1000 for chunk in chunks))
 
-    def test_voice_for_language(self):
-        self.assertEqual(voice_for("en"), "Joanna")
-        self.assertEqual(voice_for("fr"), "Celine")
-        self.assertEqual(voice_for("xx"), "Joanna")
-
-    def test_narrate_writes_mp3(self):
+    def test_narration_requires_preprovisioned_local_model(self):
+        script = {"beats": [{"ord": 1, "text": "Private narration."}]}
         with tempfile.TemporaryDirectory() as tmp:
-            out = narrate_script(SCRIPT, Path(tmp) / "voiceover.mp3", client=FakePolly())
-            data = out.read_bytes()
-        self.assertTrue(data.startswith(b"AUDIO"))
+            with self.assertRaises(NarrationError):
+                narrate_script(
+                    script,
+                    Path(tmp) / "voiceover.mp3",
+                    model_path=str(Path(tmp) / "missing.onnx"),
+                )
 
-    def test_narrate_rejects_empty_script(self):
-        from grounded.narrate import PollyError
-
+    def test_narrate_rejects_empty_script_before_any_process(self):
         with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(PollyError):
-                narrate_script({"language": "en", "beats": []}, Path(tmp) / "v.mp3", client=FakePolly())
+            with self.assertRaises(NarrationError):
+                narrate_script(
+                    {"beats": []},
+                    Path(tmp) / "voiceover.mp3",
+                    model_path=str(Path(tmp) / "missing.onnx"),
+                )
 
 
 if __name__ == "__main__":
