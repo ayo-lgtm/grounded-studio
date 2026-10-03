@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -112,6 +113,11 @@ class ChatIn(BaseModel):
     question: str = Field(max_length=2000)
 
 
+class ShareIn(BaseModel):
+    emails: list[str] = Field(default_factory=list, max_length=200)
+    company: Optional[bool] = None
+
+
 class MemberIn(BaseModel):
     email: str
     role: str = "viewer"
@@ -142,6 +148,12 @@ def local_docs():
 
 @app.get("/")
 def room():
+    return HTMLResponse(_ROOM, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/watch/{briefing_id}")
+def watch(briefing_id: str):
+    """The viewer page: same app, watch mode. Data still needs SSO + a grant."""
     return HTMLResponse(_ROOM, headers={"Cache-Control": "no-store"})
 
 
@@ -282,24 +294,31 @@ def list_briefings(db: Session = Depends(get_db), user: User = Depends(_member))
     rows = db.execute(
         text(
             """
-            SELECT b.id, b.title, b.state, b.skill_id, b.skill_version, b.created_at
+            SELECT b.id, b.title, b.state, b.skill_id, b.skill_version, b.created_at, false AS shared
             FROM briefings b
             JOIN projects p ON p.id = b.project_id
             JOIN workspace_members wm ON wm.workspace_id = p.workspace_id AND wm.user_id = :u
-            ORDER BY b.created_at DESC
-            LIMIT 50
+            UNION
+            SELECT b.id, b.title, b.state, b.skill_id, b.skill_version, b.created_at, true AS shared
+            FROM briefings b JOIN briefing_grants g ON g.briefing_id = b.id
+            WHERE g.email = lower(:email)
+              AND NOT EXISTS (
+                SELECT 1 FROM projects p JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+                WHERE p.id = b.project_id AND wm.user_id = :u)
+            ORDER BY created_at DESC
+            LIMIT 80
             """
         ),
-        {"u": user.id},
+        {"u": user.id, "email": user.email},
     ).mappings().all()
     return {"briefings": [_public_row(row) for row in rows]}
 
 
 @app.get("/api/v1/briefings/{briefing_id}")
 def get_briefing(briefing_id: str, db: Session = Depends(get_db), user: User = Depends(_member)):
-    authorize_briefing(db, user, briefing_id)
+    role = authorize_briefing(db, user, briefing_id)
     row = db.execute(
-        text("SELECT id, title, state, skill_id, skill_version, language FROM briefings WHERE id = :id"),
+        text("SELECT id, title, state, skill_id, skill_version, language, visibility FROM briefings WHERE id = :id"),
         {"id": briefing_id},
     ).mappings().first()
     assets = db.execute(
@@ -309,7 +328,8 @@ def get_briefing(briefing_id: str, db: Session = Depends(get_db), user: User = D
         ),
         {"id": briefing_id},
     ).mappings().all()
-    return {**_public_row(row), "assets": [_public_row(a) for a in assets]}
+    member = role_in_workspace_of(db, user, briefing_id) is not None
+    return {**_public_row(row), "role": role, "member": member, "assets": [_public_row(a) for a in assets]}
 
 
 @app.post("/api/v1/briefings/{briefing_id}/assets")
@@ -465,6 +485,58 @@ def accept_script(briefing_id: str, db: Session = Depends(get_db), user: User = 
     return {"accepted": True}
 
 
+@app.get("/api/v1/briefings/{briefing_id}/share")
+def get_share(briefing_id: str, db: Session = Depends(get_db), user: User = Depends(_member)):
+    authorize_briefing(db, user, briefing_id, need="editor")
+    vis = db.execute(text("SELECT visibility FROM briefings WHERE id = :id"), {"id": briefing_id}).scalar_one()
+    rows = db.execute(
+        text("SELECT email, role, created_at FROM briefing_grants WHERE briefing_id = :id ORDER BY created_at"),
+        {"id": briefing_id},
+    ).mappings().all()
+    return {"company": vis == "company", "people": [_public_row(r) for r in rows], "watch_path": f"/watch/{briefing_id}"}
+
+
+_EMAIL = re.compile(r"[^@\s<>\"']+@[^@\s<>\"']+\.[^@\s<>\"']+")
+
+
+@app.post("/api/v1/briefings/{briefing_id}/share")
+def set_share(briefing_id: str, body: ShareIn, db: Session = Depends(get_db), user: User = Depends(_member)):
+    """Let people watch and ask, without editing. Always behind company SSO."""
+    authorize_briefing(db, user, briefing_id, need="editor")
+    if len(body.emails) > 500:
+        raise HTTPException(400, "share with at most 500 people at a time")
+    added = 0
+    for raw in body.emails:
+        email = raw.strip().lower()
+        if len(email) > 254 or not _EMAIL.fullmatch(email):
+            raise HTTPException(400, "each share must be an email address")
+        db.execute(
+            text(
+                "INSERT INTO briefing_grants (briefing_id, email, role, granted_by) VALUES (:b, :e, 'viewer', :u) "
+                "ON CONFLICT (briefing_id, email) DO NOTHING"
+            ),
+            {"b": briefing_id, "e": email, "u": user.id},
+        )
+        added += 1
+    if body.company is not None:
+        db.execute(
+            text("UPDATE briefings SET visibility = :v WHERE id = :id"),
+            {"v": "company" if body.company else "workspace", "id": briefing_id},
+        )
+    audit(db, user, "briefing.share", "briefing", briefing_id, people=added, company=bool(body.company))
+    db.commit()
+    return get_share(briefing_id, db, user)
+
+
+@app.delete("/api/v1/briefings/{briefing_id}/share/{email}")
+def remove_share(briefing_id: str, email: str, db: Session = Depends(get_db), user: User = Depends(_member)):
+    authorize_briefing(db, user, briefing_id, need="editor")
+    db.execute(text("DELETE FROM briefing_grants WHERE briefing_id = :b AND email = lower(:e)"), {"b": briefing_id, "e": email})
+    audit(db, user, "briefing.unshare", "briefing", briefing_id)
+    db.commit()
+    return {"ok": True}
+
+
 @app.get("/api/v1/briefings/{briefing_id}/sources")
 def list_sources(briefing_id: str, db: Session = Depends(get_db), user: User = Depends(_member)):
     """Normalized source rows so every citation can be audited."""
@@ -518,6 +590,9 @@ def _asset_key(db: Session, user: User, table: str, object_id: str) -> str:
 @app.get("/api/v1/assets/{asset_id}/content")
 def asset_content(asset_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(_member)):
     key = _asset_key(db, user, "source_assets", asset_id)
+    owner = db.execute(text("SELECT briefing_id FROM source_assets WHERE id = :id"), {"id": asset_id}).scalar_one()
+    if role_in_workspace_of(db, user, str(owner)) is None:
+        raise HTTPException(403, "shared viewers can watch and ask, not download raw sources")
     audit(db, user, "asset.read", "source_asset", asset_id)
     db.commit()
     return _stream(key, request, disposition="attachment")
@@ -658,6 +733,17 @@ def _record_chat(db: Session, user: User, briefing_id: str, question: str, resul
             {"id": str(uuid.uuid4()), "s": session_id, "role": role, "text": message, "cites": json.dumps(cites), "provider": provider},
         )
     db.commit()
+
+
+def role_in_workspace_of(db: Session, user: User, briefing_id: str) -> str | None:
+    row = db.execute(
+        text(
+            "SELECT wm.role::text FROM briefings b JOIN projects p ON p.id = b.project_id "
+            "JOIN workspace_members wm ON wm.workspace_id = p.workspace_id AND wm.user_id = :u WHERE b.id = :id"
+        ),
+        {"u": user.id, "id": briefing_id},
+    ).first()
+    return str(row[0]) if row else None
 
 
 def _public_row(row) -> dict:

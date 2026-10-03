@@ -4,7 +4,7 @@ Environment (all optional; defaults are the offline-safe choices):
 
 ``GROUNDED_INFERENCE_PROVIDER``      none | local | bedrock        (default none)
 ``GROUNDED_ASSIST_FEATURES``         comma list of polish, chat, summary (default empty)
-``GROUNDED_EMBEDDING_PROVIDER``      local-hash | bedrock          (default local-hash)
+``GROUNDED_EMBEDDING_PROVIDER``      local-hash | local-onnx | bedrock (default local-hash)
 ``GROUNDED_TRANSCRIPTION_PROVIDER``  local | none                  (default local)
 ``GROUNDED_TTS_PROVIDER``            local | none                  (default local)
 ``GROUNDED_IMAGE_TEXT_PROVIDER``     none | local-ocr | bedrock    (default none)
@@ -28,7 +28,7 @@ from ..policy import EgressError, from_env
 from .base import ProviderError
 
 INFERENCE = ("none", "local", "bedrock")
-EMBEDDING = ("local-hash", "bedrock")
+EMBEDDING = ("local-hash", "local-onnx", "bedrock")
 TRANSCRIPTION = ("local", "none")
 TTS = ("local", "none")
 IMAGE_TEXT = ("none", "local-ocr", "bedrock")
@@ -172,6 +172,10 @@ def embedding_provider(*, client: Any = None):
         from .bedrock import BedrockEmbeddings
 
         return BedrockEmbeddings(client=client)
+    if chosen.embedding == "local-onnx":
+        from .local import LocalOnnxEmbeddings
+
+        return LocalOnnxEmbeddings()
     from .local import LocalHashEmbeddings
 
     return LocalHashEmbeddings()

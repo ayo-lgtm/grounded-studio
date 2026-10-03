@@ -183,28 +183,49 @@ def role_in_workspace(db: Session, user: User, workspace_id: str) -> str | None:
     return str(row[0]) if row else None
 
 
-def authorize_briefing(db: Session, user: User, briefing_id: str, need: str = "viewer") -> None:
-    """404 for briefings the user cannot see (no existence leak), 403 for low role."""
+def briefing_role(db: Session, user: User, briefing_id: str) -> str | None:
+    """Effective role: workspace membership, else a personal grant, else company link."""
     try:
         uuid.UUID(str(briefing_id))
     except ValueError:
-        raise HTTPException(404, "briefing not found") from None
+        return None
     row = db.execute(
         text(
             """
-            SELECT wm.role::text
+            SELECT wm.role::text, b.visibility,
+                   (SELECT g.role FROM briefing_grants g WHERE g.briefing_id = b.id AND g.email = lower(:email)) AS granted
             FROM briefings b
             JOIN projects p ON p.id = b.project_id
             LEFT JOIN workspace_members wm ON wm.workspace_id = p.workspace_id AND wm.user_id = :u
             WHERE b.id = :id
             """
         ),
-        {"id": briefing_id, "u": user.id},
+        {"id": briefing_id, "u": user.id, "email": user.email},
     ).first()
-    if row is None or row[0] is None:
+    if row is None:
+        return None
+    member, visibility, granted = row
+    if member:
+        return str(member)
+    if granted:
+        return "viewer"
+    if visibility == "company":
+        return "viewer"
+    return None
+
+
+def authorize_briefing(db: Session, user: User, briefing_id: str, need: str = "viewer") -> str:
+    """404 for briefings the user cannot see (no existence leak), 403 for low role.
+
+    Shared viewers (personal grant or company-wide link) can watch, read the
+    sources and ask questions; they can never upload, compile or accept.
+    """
+    role = briefing_role(db, user, briefing_id)
+    if role is None:
         raise HTTPException(404, "briefing not found")
-    if ROLE_RANK.get(str(row[0]), -1) < ROLE_RANK[need]:
+    if ROLE_RANK.get(role, -1) < ROLE_RANK[need]:
         raise HTTPException(403, f"{need} role required")
+    return role
 
 
 def audit(db: Session, user: User | None, action: str, entity_type: str, entity_id: str | None, **meta: Any) -> None:

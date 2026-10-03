@@ -143,6 +143,16 @@ class LocalPiper:
 
         self.model_id = engine_name()
 
+    def synthesize(self, text: str, dest: Path) -> Path:
+        """One clip of local speech (wav) for a single beat."""
+        from ..local_voice import LocalVoiceError, synthesize
+
+        try:
+            synthesize(text, dest)
+        except LocalVoiceError as exc:
+            raise ProviderError(str(exc)) from exc
+        return dest
+
     def narrate(self, script: dict[str, Any], out_path: Path) -> Path:
         from ..local_voice import LocalVoiceError, narrate_local
 
@@ -175,3 +185,61 @@ class LocalOCR:
             raise ProviderError("local OCR failed")
         text = proc.stdout.decode("utf-8", "replace")
         return [part.strip() for part in text.split("\n\n") if part.strip()]
+
+
+class LocalOnnxEmbeddings:
+    """Sentence embeddings from a locally provisioned ONNX model (e.g. MiniLM / BGE / E5).
+
+    ``GROUNDED_EMBEDDING_MODEL_DIR`` must contain ``model.onnx`` and
+    ``tokenizer.json``. onnxruntime and tokenizers ship with faster-whisper,
+    so no extra runtime is needed. Nothing is downloaded: a missing file
+    fails closed.
+    """
+
+    name = "local-onnx"
+
+    def __init__(self, model_dir: str | None = None, max_length: int = 256) -> None:
+        base = Path(model_dir or os.environ.get("GROUNDED_EMBEDDING_MODEL_DIR") or "")
+        model = base / "model.onnx"
+        tokenizer = base / "tokenizer.json"
+        if not base.parts or not model.is_file() or not tokenizer.is_file():
+            raise ProviderError("local-onnx embeddings need model.onnx and tokenizer.json in GROUNDED_EMBEDDING_MODEL_DIR")
+        try:
+            import onnxruntime as ort
+            from tokenizers import Tokenizer
+        except ImportError as exc:
+            raise ProviderError("onnxruntime and tokenizers are required for local-onnx embeddings") from exc
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = int(os.environ.get("GROUNDED_EMBEDDING_THREADS") or 2)
+        self._session = ort.InferenceSession(str(model), options, providers=["CPUExecutionProvider"])
+        self._tokenizer = Tokenizer.from_file(str(tokenizer))
+        self._tokenizer.enable_truncation(max_length=max_length)
+        self._tokenizer.enable_padding()
+        self._inputs = {item.name for item in self._session.get_inputs()}
+        self.model_id = base.name or "local-onnx"
+        probe = self.embed(["probe"])
+        self.dims = len(probe[0])
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        import numpy as np
+
+        out: list[list[float]] = []
+        for start in range(0, len(texts), 32):
+            batch = texts[start : start + 32]
+            encoded = self._tokenizer.encode_batch(batch)
+            ids = np.array([e.ids for e in encoded], dtype=np.int64)
+            mask = np.array([e.attention_mask for e in encoded], dtype=np.int64)
+            feed = {"input_ids": ids, "attention_mask": mask}
+            if "token_type_ids" in self._inputs:
+                feed["token_type_ids"] = np.zeros_like(ids)
+            feed = {k: v for k, v in feed.items() if k in self._inputs}
+            hidden = self._session.run(None, feed)[0]
+            if hidden.ndim == 3:
+                weights = mask[..., None].astype(hidden.dtype)
+                pooled = (hidden * weights).sum(axis=1) / np.clip(weights.sum(axis=1), 1e-9, None)
+            else:
+                pooled = hidden
+            norms = np.linalg.norm(pooled, axis=1, keepdims=True)
+            pooled = pooled / np.clip(norms, 1e-9, None)
+            out.extend(row.astype(float).tolist() for row in pooled)
+        return out

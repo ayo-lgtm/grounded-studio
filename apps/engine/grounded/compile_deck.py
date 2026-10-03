@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .layouts import SKILL_RENDERER
@@ -445,3 +446,110 @@ def _script(skill_id: str, title: str, beats: list[dict[str, Any]]) -> dict[str,
         "renderer": SKILL_RENDERER[skill_id],
         "beats": beats,
     }
+
+
+_IMPERATIVE = frozenset(
+    """
+    open click choose select go enter type add create request book install sign log set review read complete
+    submit send schedule join ask check download upload save connect configure run start follow use contact meet
+    attend update turn enable disable find visit make write call email press tap drag drop copy paste paste name
+    invite share export import pick confirm verify test close finish return bring keep store wear report print
+    fill attach approve assign move edit delete remove reset change link unlink switch search filter sort
+    collect get take post grab learn watch talk introduce register activate enroll enrol apply claim plan prepare
+    ensure give tell remember avoid ping message reach provide list mark record track pair shadow sync navigate
+    """.split()
+)
+_NUMBERED = re.compile(r"^\s*(?:step\s*)?(\d{1,2})[.):\-]\s+(.*)$", re.I)
+_BULLET = re.compile(r"^\s*[-*•·]\s+(.*)$")
+
+
+def _step_text(text: str) -> str | None:
+    """The instruction if ``text`` reads as one; None otherwise."""
+    clean = text.strip()
+    match = _NUMBERED.match(clean) or _BULLET.match(clean)
+    if match:
+        return clean
+    first = re.split(r"[\s,:]+", clean, maxsplit=1)[0].lower()
+    if first in _IMPERATIVE and len(clean.split()) >= 3:
+        return clean
+    return None
+
+
+def compile_training(doc: dict[str, Any], skill_id: str, *, checkpoint_every: int = 3) -> dict[str, Any]:
+    """A course from a document: sections, numbered steps, and grounded checkpoints.
+
+    Every beat quotes its block. A checkpoint asks what comes after a step;
+    its answer is the next step's own text, so nothing is invented.
+    """
+    blocks = [block for block in doc.get("blocks") or [] if (block.get("text") or "").strip()]
+    if not blocks:
+        raise CompileError(["document has no blocks to teach from"])
+    title = doc.get("title") or "Training"
+    title_block = doc.get("title_block") or blocks[0]["id"]
+    beats: list[dict[str, Any]] = []
+    _add(beats, kind="cover", layout="cover", text=title, slots={}, claims=_text_claims(title, title_block),
+         citations=[_document(title_block)])
+    headings = {str(block.get("heading_path") or "").split(" > ")[-1] for block in blocks if block.get("heading_path")}
+    step_no = 0
+    steps: list[dict[str, Any]] = []
+    for block in blocks:
+        text = block["text"].strip()
+        role = block.get("role") or "evidence"
+        if text == title.strip() and block.get("id") == title_block:
+            continue
+        if text in headings and len(text.split()) <= 8:
+            _add(beats, kind="section", layout="statement", text=text, slots={"eyebrow": "Section"},
+                 claims=_text_claims(text, block["id"]), citations=[_document(block["id"])])
+            continue
+        instruction = _step_text(text)
+        if role == "risk" or (role == "ask" and not instruction):
+            layout = "ask" if role == "ask" else "statement"
+            eyebrow = "Ask" if role == "ask" else "Watch out"
+            _add(beats, kind=role, layout=layout, text=text, slots={"eyebrow": eyebrow},
+                 claims=_text_claims(text, block["id"]), citations=[_document(block["id"])])
+            continue
+        if instruction:
+            step_no += 1
+            beat = {
+                "kind": "step",
+                "layout": "step",
+                "text": instruction,
+                "slots": {"step": step_no, "eyebrow": f"Step {step_no}"},
+                "claims": _text_claims(instruction, block["id"]),
+                "citations": [_document(block["id"])],
+            }
+            beats.append(beat)
+            steps.append(beat)
+            continue
+        _add(beats, kind="note", layout="statement", text=text, slots={"eyebrow": "Know this"},
+             claims=_text_claims(text, block["id"]), citations=[_document(block["id"])])
+    if skill_id in {"training-course", "onboarding-guide"} and len(steps) >= 2:
+        beats = _with_checkpoints(beats, steps, checkpoint_every)
+    script = _script(skill_id, title, beats)
+    script["course"] = {"steps": step_no, "checkpoints": sum(1 for b in beats if b.get("kind") == "checkpoint")}
+    return script
+
+
+def _with_checkpoints(beats: list[dict[str, Any]], steps: list[dict[str, Any]], every: int) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen_steps = 0
+    for beat in beats:
+        out.append(beat)
+        if beat.get("kind") != "step":
+            continue
+        seen_steps += 1
+        index = steps.index(beat)
+        if seen_steps % every == 0 and index + 1 < len(steps):
+            nxt = steps[index + 1]
+            question = f"After “{beat['text'].rstrip('.')}”, what comes next?"
+            out.append(
+                {
+                    "kind": "checkpoint",
+                    "layout": "statement",
+                    "text": question,
+                    "slots": {"eyebrow": "Check yourself", "answer": nxt["text"]},
+                    "claims": list(beat.get("claims") or []) + list(nxt.get("claims") or []),
+                    "citations": list(beat["citations"]) + list(nxt["citations"]),
+                }
+            )
+    return out

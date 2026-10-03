@@ -41,6 +41,7 @@ Existing tools either send data to a SaaS model or generate cinematic video that
 | [docs/13-house-style.md](docs/13-house-style.md) | Locked type, color, and the two renderers |
 | [docs/17-offline-egress.md](docs/17-offline-egress.md) | Offline profile and `/health` |
 | [docs/18-deployment-profiles.md](docs/18-deployment-profiles.md) | `offline` vs `aws-private` (Bedrock/Nova), providers, grounding with models, egress layers |
+| [docs/20-ask-me-videos.md](docs/20-ask-me-videos.md) | Ask-me demo videos, knowledge base, screen reading, doc-to-video courses, sharing |
 | [schema/schema.sql](schema/schema.sql) | Postgres schema |
 | [skills/](skills/) | Skill definitions the router loads |
 
@@ -85,6 +86,13 @@ Implemented in `apps/`:
   claims are persisted and verified against the normalized source rows
   before a script ships. Chat answers only from the briefing or says "That
   is not in this briefing."
+* **Ask-me videos.** Drop a demo recording plus its knowledge base and share
+  a `/watch` link inside the company login. Viewers ask the video questions
+  and either jump to the exact clip ("Show me") or get the answer quoted from
+  the source. The answers cover what was said, what was on screen (local
+  OCR), the documents and the workbook rows. Documents become narrated,
+  chaptered training videos with steps and checkpoints. See
+  [docs/20](docs/20-ask-me-videos.md).
 * **Security.** OIDC or SSO-proxy auth with workspace RBAC on every data
   endpoint; streamed, hashed uploads; private storage only; content-free
   logs; a socket-level egress guard; infra egress-deny for Compose,
@@ -100,7 +108,8 @@ python scripts/dev_studio.py        # needs postgres + pgvector and redis-server
 
 It starts a throwaway Postgres and Redis, an S3-compatible store on 127.0.0.1
 standing in for MinIO, the real API (development auth) and worker, and seeds
-three synthetic briefings. For a real deployment use `infra/compose.yaml`
+synthetic briefings (including an ask-me demo with a knowledge base and an
+onboarding course). For a real deployment use `infra/compose.yaml`
 ([docs/18](docs/18-deployment-profiles.md)); the studio UI design is described
 in [docs/19](docs/19-studio-design.md).
 

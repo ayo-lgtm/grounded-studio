@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     model_name: str = "local-instruct"
     trans_language: str = "en-US"
     artifact_dir: str = "out/jobs"
+    deck_video: str = "on"
+    screen_interval_s: float = 2.0
 
     class Config:
         env_file = ".env"

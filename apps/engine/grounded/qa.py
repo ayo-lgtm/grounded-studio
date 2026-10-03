@@ -8,7 +8,7 @@ from .layouts import ALL_LAYOUTS, FORBIDDEN_KEYS, SKILL_LAYOUTS, SKILL_RENDERER
 from .grounding import recompute
 from .numbers import close, parse_numbers
 
-DISPLAY_KEYS = ("actual", "target", "delta", "period", "body")
+DISPLAY_KEYS = ("actual", "target", "delta", "period", "body", "answer")
 
 
 def validate_script(

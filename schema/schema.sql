@@ -57,11 +57,22 @@ CREATE TABLE briefings (
   skill_version   TEXT NOT NULL,
   language        TEXT NOT NULL DEFAULT 'en',
   is_template     BOOLEAN NOT NULL DEFAULT FALSE,
+  visibility      TEXT NOT NULL DEFAULT 'workspace',
   published_at    TIMESTAMPTZ,
   created_by      UUID NOT NULL REFERENCES users(id),
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE briefing_grants (
+  briefing_id   UUID NOT NULL REFERENCES briefings(id) ON DELETE CASCADE,
+  email         TEXT NOT NULL,
+  role          TEXT NOT NULL DEFAULT 'viewer',
+  granted_by    UUID REFERENCES users(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (briefing_id, email)
+);
+CREATE INDEX briefing_grants_email ON briefing_grants (email);
 
 CREATE TABLE source_assets (
   id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
