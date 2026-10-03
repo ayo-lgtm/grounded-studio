@@ -162,6 +162,14 @@ def compile_bundle(*, skill_id: str, title: str, bundle: SourceBundle, sources: 
     if chosen in WORKBOOK_SKILLS and chosen != "executive-business-review" and not workbook:
         raise CompileError([f"{skill_id} needs a workbook upload"])
 
+    if documents and not spoken and chosen in TRAINING_SKILLS:
+        course = "onboarding-guide" if chosen == "onboarding-guide" else "training-course"
+        script = _compile_course(documents, course)
+        _finish(script, course, None)
+        _contract_gate(script, course, None)
+        _approve(script)
+        return script
+
     if documents and (chosen in sources.DOCUMENT_SKILLS or not spoken):
         doc_skill = chosen if chosen in sources.DOCUMENT_SKILLS else "leadership-brief"
         script = _compile_documents(documents, doc_skill)
@@ -195,6 +203,33 @@ def compile_bundle(*, skill_id: str, title: str, bundle: SourceBundle, sources: 
     if skill_id in RECORDING_SKILLS:
         raise CompileError(["transcribe first"])
     raise CompileError(["upload a workbook, PDF/DOCX/PPTX, screenshot, or recording before compile"])
+
+
+TRAINING_SKILLS = frozenset({"onboarding-guide", "training-course", "training-quiz-deck", "sop-training"})
+
+
+def _compile_course(documents: list[SourceDoc], skill_id: str) -> dict[str, Any]:
+    from .compile_deck import compile_training
+
+    primary = documents[0]
+    script = compile_training(primary.doc, skill_id)
+    _tag(script, "document", primary.asset_id, pages=_pages(primary.doc))
+    for extra in documents[1:]:
+        more = compile_training(extra.doc, skill_id)
+        _tag(more, "document", extra.asset_id, pages=_pages(extra.doc))
+        script["beats"].extend(beat for beat in more["beats"] if beat.get("layout") != "cover")
+    step = 0
+    for index, beat in enumerate(script["beats"], start=1):
+        beat["ord"] = index
+        if beat.get("kind") == "step":
+            step += 1
+            beat["slots"]["step"] = step
+            beat["slots"]["eyebrow"] = f"Step {step}"
+    script["course"] = {
+        "steps": step,
+        "checkpoints": sum(1 for beat in script["beats"] if beat.get("kind") == "checkpoint"),
+    }
+    return script
 
 
 def _accepts_documents(runtime) -> bool:

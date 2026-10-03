@@ -371,6 +371,68 @@ class PrivateStackTest(unittest.TestCase):
         answer = client.post(f"/api/v1/briefings/{briefing_id}/chat", json={"question": "Where do I see invoices?"}, headers=auth()).json()
         self.assertEqual(answer["citations"][0]["kind"], "recording")
 
+    def test_35_onboarding_doc_becomes_a_video_and_shares_watch_only(self):
+        created = client.post("/api/v1/briefings", json={"title": "Onboarding", "skill_id": "onboarding-guide"}, headers=auth()).json()
+        briefing_id = created["id"]
+        handbook = (
+            "# Welcome to Northwind\n\n## Your first week\n\n"
+            "1. Collect your laptop from the IT desk on floor 3.\n\n"
+            "2. Sign in with your badge and set a password.\n\n"
+            "3. Request access to the Ledgerly workspace.\n\n"
+            "4. Book a 30 minute intro with your manager.\n\n"
+            "Expense claims over $500 need manager approval.\n"
+        )
+        upload = client.post(f"/api/v1/briefings/{briefing_id}/assets", files={"file": ("handbook.md", handbook.encode(), "text/markdown")}, headers=auth())
+        self.assertEqual(upload.status_code, 200, upload.text)
+        self.assertEqual(job(briefing_id, "ingest")["state"], "succeeded")
+        compiled = job(briefing_id, "compile")
+        self.assertEqual(compiled["state"], "succeeded", compiled)
+        script = client.get(f"/api/v1/briefings/{briefing_id}/script", headers=auth()).json()
+        layouts = [b["layout"] for b in script["raw_json"]["beats"]]
+        self.assertIn("step", layouts)
+        self.assertTrue(any(b["kind"] == "checkpoint" for b in script["raw_json"]["beats"]))
+        rendered = job(briefing_id, "render")
+        self.assertEqual(rendered["state"], "succeeded", rendered)
+        kinds = {a["kind"] for a in client.get(f"/api/v1/briefings/{briefing_id}/artifacts", headers=auth()).json()["artifacts"]}
+        self.assertTrue({"deck", "video"} <= kinds, kinds)
+
+        viewer = auth("u-new-hire", "new.hire@corp.internal")
+        stranger = auth("u-other", "other@corp.internal")
+        self.assertEqual(client.get(f"/api/v1/briefings/{briefing_id}", headers=viewer).status_code, 404)
+        bad = client.post(f"/api/v1/briefings/{briefing_id}/share", json={"emails": ["not an email"]}, headers=auth())
+        self.assertEqual(bad.status_code, 400)
+        shared = client.post(f"/api/v1/briefings/{briefing_id}/share", json={"emails": ["New.Hire@corp.internal"]}, headers=auth())
+        self.assertEqual(shared.status_code, 200, shared.text)
+        self.assertEqual([p["email"] for p in shared.json()["people"]], ["new.hire@corp.internal"])
+        self.assertEqual(shared.json()["watch_path"], f"/watch/{briefing_id}")
+
+        # The viewer can watch and ask...
+        listed = client.get("/api/v1/briefings", headers=viewer).json()["briefings"]
+        self.assertEqual([(b["id"], b["shared"]) for b in listed], [(briefing_id, True)])
+        detail = client.get(f"/api/v1/briefings/{briefing_id}", headers=viewer).json()
+        self.assertEqual(detail["role"], "viewer")
+        self.assertFalse(detail["member"])
+        self.assertEqual(client.get(f"/watch/{briefing_id}").status_code, 200)
+        answer = client.post(f"/api/v1/briefings/{briefing_id}/chat", json={"question": "Where do I collect my laptop?"}, headers=viewer).json()
+        self.assertFalse(answer["refused"], answer)
+        self.assertIn("IT desk", answer["text"])
+        refused = client.post(f"/api/v1/briefings/{briefing_id}/chat", json={"question": "What is the CEO's salary?"}, headers=viewer).json()
+        self.assertTrue(refused["refused"])
+        # ...but never edit, re-share, run jobs or download raw sources.
+        self.assertEqual(client.post(f"/api/v1/briefings/{briefing_id}/assets", files={"file": ("x.md", b"# x", "text/markdown")}, headers=viewer).status_code, 403)
+        self.assertEqual(client.post(f"/api/v1/briefings/{briefing_id}/jobs", json={"type": "compile"}, headers=viewer).status_code, 403)
+        self.assertEqual(client.post(f"/api/v1/briefings/{briefing_id}/share", json={"emails": ["x@corp.internal"]}, headers=viewer).status_code, 403)
+        self.assertEqual(client.get(f"/api/v1/assets/{upload.json()['id']}/content", headers=viewer).status_code, 403)
+        self.assertEqual(client.get(f"/api/v1/briefings/{briefing_id}", headers=stranger).status_code, 404)
+
+        # A company-wide link lets anyone signed in watch; turning it off and revoking closes it again.
+        client.post(f"/api/v1/briefings/{briefing_id}/share", json={"emails": [], "company": True}, headers=auth())
+        self.assertEqual(client.get(f"/api/v1/briefings/{briefing_id}", headers=stranger).json()["role"], "viewer")
+        client.post(f"/api/v1/briefings/{briefing_id}/share", json={"emails": [], "company": False}, headers=auth())
+        self.assertEqual(client.delete(f"/api/v1/briefings/{briefing_id}/share/new.hire@corp.internal", headers=auth()).status_code, 200)
+        self.assertEqual(client.get(f"/api/v1/briefings/{briefing_id}", headers=stranger).status_code, 404)
+        self.assertEqual(client.get(f"/api/v1/briefings/{briefing_id}", headers=viewer).status_code, 404)
+
     def test_40_json_workbook_packs_cannot_ship(self):
         created = client.post("/api/v1/briefings", json={"title": "JSON", "skill_id": "weekly-ops-review"}, headers=auth()).json()
         pack = json.dumps({"title": {"text": "x", "sheet": "S", "addr": "A1"}, "kpis": [{"label": "Orders", "sheet": "S", "addr": "B2", "value": 9}]})

@@ -30,7 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests" / "e2e"))
 
-from stack import Stack, free_port  # noqa: E402
+from stack import Stack  # noqa: E402
 
 
 def workbook() -> bytes:
@@ -83,6 +83,75 @@ def memo() -> bytes:
     ).encode()
 
 
+HANDBOOK = b"""# Welcome to Northwind
+
+## Your first day
+
+Request laptop access from IT on day one.
+
+Collect your badge at the front desk.
+
+Sign in to the HR portal and confirm your bank details.
+
+Book your security training in the first week.
+
+## How we work
+
+Core hours are 10:00 to 15:00.
+
+Post questions in the #help channel.
+
+Join the Monday team sync at 9:30.
+
+Approve your onboarding plan with your manager by Friday.
+"""
+
+KNOWLEDGE = b"""# Ledgerly admin guide
+
+## Billing
+
+Invoices are generated on the first business day of each month.
+
+Exports are limited to 10,000 rows per file.
+
+## Members
+
+Only workspace admins can invite teammates.
+
+Admins can reset a member's password from the Members page.
+
+## Support
+
+Email support@ledgerly.internal for access problems.
+"""
+
+DEMO_SCRIPT = [
+    (0, 3600, "Settings · Workspace · Profile", "Start on the settings page from the top menu."),
+    (3600, 7600, "Billing · Download invoices · Export CSV", "Choose Billing to download your invoices or export them as CSV."),
+    (7600, 11600, "Members · Invite teammate · Roles", "To add a teammate, open Members and press Invite."),
+    (11600, 15000, "Roles · Admin · Viewer", "Pick Viewer if they only need to read reports."),
+]
+
+
+def demo_video(dest: Path) -> Path:
+    font = next((str(p) for p in (Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),) if p.exists()), None)
+    filters = []
+    for start, end, screen, _said in DEMO_SCRIPT:
+        title, *rest = [part.strip() for part in screen.split("·")]
+        sub = "    ".join(rest)
+        enable = f"between(t,{start/1000},{end/1000})"
+        filters.append(f"drawtext={'fontfile=' + font + ':' if font else ''}text='{title}':fontsize=96:fontcolor=0x1a1814:x=120:y=160:enable='{enable}'")
+        filters.append(f"drawtext={'fontfile=' + font + ':' if font else ''}text='{sub}':fontsize=60:fontcolor=0x1d3c34:x=120:y=360:enable='{enable}'")
+    total = DEMO_SCRIPT[-1][1] / 1000
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"color=c=0xf3f0e8:s=1280x720:d={total}:r=24",
+         "-f", "lavfi", "-i", f"sine=frequency=220:duration={total}", "-vf", ",".join(filters),
+         "-shortest", "-pix_fmt", "yuv420p", "-c:a", "aac", str(dest)],
+        check=True,
+    )
+    return dest
+
+
 def http(method: str, url: str, body: bytes | None = None, headers: dict | None = None) -> dict:
     request = urllib.request.Request(url, data=body, method=method, headers=headers or {})
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -102,8 +171,56 @@ def multipart(field_file: tuple[str, bytes, str], kind: str) -> tuple[bytes, str
     return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
+def run_jobs(base: str, briefing_id: str, jobs: tuple[str, ...], title: str) -> bool:
+    for job in jobs:
+        started = http("POST", f"{base}/api/v1/briefings/{briefing_id}/jobs", json.dumps({"type": job}).encode(), {"content-type": "application/json"})
+        for _ in range(600):
+            state = http("GET", f"{base}/api/v1/jobs/{started['id']}")
+            if state["state"] in {"succeeded", "failed"}:
+                break
+            time.sleep(0.5)
+        if state["state"] != "succeeded":
+            print(f"  {title}: {job} failed — {state.get('error')}")
+            return False
+    return True
+
+
+def seed_demo(base: str, database_url: str, tmp: Path) -> None:
+    """An ask-me demo: synthetic recording + knowledge base. Speech segments are
+    synthetic here (no Whisper weights in a dev box); the screen is read by real OCR."""
+    from sqlalchemy import create_engine, text
+
+    title = "Ledgerly — billing and members demo"
+    created = http("POST", base + "/api/v1/briefings", json.dumps({"title": title, "skill_id": "product-walkthrough"}).encode(), {"content-type": "application/json"})
+    video = demo_video(tmp / "ledgerly-demo.mp4")
+    for name, data, mime in (("ledgerly-demo.mp4", video.read_bytes(), "video/mp4"), ("ledgerly-admin-guide.md", KNOWLEDGE, "text/markdown")):
+        body, ctype = multipart((name, data, mime), "attachment")
+        http("POST", f"{base}/api/v1/briefings/{created['id']}/assets", body, {"content-type": ctype})
+    if not run_jobs(base, created["id"], ("ingest",), title):
+        return
+    engine = create_engine(database_url)
+    with engine.begin() as conn:
+        asset = conn.execute(text("SELECT id FROM source_assets WHERE briefing_id = :b AND kind = 'recording'"), {"b": created["id"]}).scalar_one()
+        conn.execute(text("UPDATE source_assets SET duration_ms = :d WHERE id = :a"), {"d": DEMO_SCRIPT[-1][1], "a": asset})
+        for start, end, _screen, said in DEMO_SCRIPT:
+            conn.execute(text("INSERT INTO transcript_segments (id, asset_id, t_start_ms, t_end_ms, text) VALUES (gen_random_uuid(), :a, :s, :e, :t)"),
+                         {"a": asset, "s": start, "e": end, "t": said})
+        if shutil.which("tesseract"):
+            sys.path.insert(0, str(ROOT / "apps" / "engine"))
+            from grounded.providers.local import LocalOCR
+            from grounded.screen_text import read_screen
+
+            for seg in read_screen(video, LocalOCR(), interval=1.0, duration_ms=DEMO_SCRIPT[-1][1]):
+                conn.execute(text("INSERT INTO transcript_segments (id, asset_id, t_start_ms, t_end_ms, text, speaker) VALUES (gen_random_uuid(), :a, :s, :e, :t, 'screen')"),
+                             {"a": asset, "s": seg["t_start_ms"], "e": seg["t_end_ms"], "t": seg["text"]})
+    engine.dispose()
+    if run_jobs(base, created["id"], ("compile", "render", "index"), title):
+        print(f"  seeded: {title}")
+
+
 def seed(base: str) -> None:
     demos = [
+        ("Welcome to Northwind — onboarding", "onboarding-guide", ("northwind-handbook.md", HANDBOOK, "text/markdown")),
         ("Week 32 finance review", "finance-wbr", ("week-32-pack.zip", package(), "application/zip")),
         ("Executive review — Q3", "executive-business-review", ("finance-pack.xlsx", workbook(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
         ("Billing console launch", "launch-announcement", ("billing-launch.md", memo(), "text/markdown")),
@@ -112,17 +229,7 @@ def seed(base: str) -> None:
         created = http("POST", base + "/api/v1/briefings", json.dumps({"title": title, "skill_id": skill}).encode(), {"content-type": "application/json"})
         body, ctype = multipart(upload, "attachment")
         http("POST", f"{base}/api/v1/briefings/{created['id']}/assets", body, {"content-type": ctype})
-        for job in ("ingest", "compile", "render", "index"):
-            started = http("POST", f"{base}/api/v1/briefings/{created['id']}/jobs", json.dumps({"type": job}).encode(), {"content-type": "application/json"})
-            for _ in range(240):
-                state = http("GET", f"{base}/api/v1/jobs/{started['id']}")
-                if state["state"] in {"succeeded", "failed"}:
-                    break
-                time.sleep(0.5)
-            if state["state"] != "succeeded":
-                print(f"  {title}: {job} failed — {state.get('error')}")
-                break
-        else:
+        if run_jobs(base, created["id"], ("ingest", "compile", "render", "index"), title):
             print(f"  seeded: {title}")
 
 
@@ -185,6 +292,8 @@ def main() -> int:
     if not args.no_seed:
         print("Seeding synthetic briefings…")
         seed(base)
+        if shutil.which("ffmpeg"):
+            seed_demo(base, stack.database_url, tmp)
     print(f"\nGrounded Studio is running at {base}  (Ctrl+C to stop)\n")
     while all(proc.poll() is None for proc in procs):
         time.sleep(1)

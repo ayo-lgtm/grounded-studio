@@ -112,7 +112,9 @@ button { cursor: pointer; background: none; border: 0; padding: 0; }
 .brand svg { flex: none; }
 .brand b { font-family: var(--serif); font-weight: 500; font-size: 21px; letter-spacing: -0.015em; }
 .brand small { display: block; margin-top: 1px; font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--text-3); }
-.crumb { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
+.crumb { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; overflow: hidden; }
+.crumb .chip { flex: none; }
+#modes, .actions, .posture, .who { flex: none; }
 .crumb .title { font-family: var(--serif); font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chip {
   display: inline-flex; align-items: center; gap: 6px;
@@ -149,6 +151,11 @@ button { cursor: pointer; background: none; border: 0; padding: 0; }
 .btn.primary { background: var(--paper); color: var(--ink); border-color: transparent; box-shadow: 0 10px 24px -10px rgba(243, 240, 232, 0.45); }
 .btn.primary:hover { background: #ffffff; }
 .btn.icon { width: 36px; padding: 0; }
+@media (max-width: 1680px) {
+  .actions .btn.squeeze { position: relative; width: 36px; padding: 0; }
+  .actions .btn.squeeze .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+}
+@media (max-width: 1560px) { .crumb .chip { display: none; } }
 .btn[disabled] { opacity: 0.45; pointer-events: none; }
 .posture { cursor: default; }
 .posture .dot { color: var(--jade); }
@@ -417,6 +424,54 @@ button.cite:hover { background: rgba(143, 211, 182, 0.16); }
 .pills span.warn { background: rgba(231, 184, 114, 0.08); border-color: rgba(231, 184, 114, 0.22); color: var(--amber); }
 .muted { color: var(--text-3); font-size: 12.5px; line-height: 1.55; }
 
+/* watch mode */
+.app.watch { grid-template-columns: minmax(0, 1fr) var(--panel); }
+.app.watch #rail { display: none; }
+.app.watch #stage, .app.watch #scrub { grid-column: 1; }
+.app.watch #panel { grid-column: 2; }
+.app.watch .brand { min-width: 0; }
+
+/* show me */
+.show { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px 0 6px; margin-top: 10px; border-radius: 999px; background: var(--paper); color: var(--ink); font-family: var(--sans); font-size: 12px; font-weight: 650; box-shadow: 0 8px 20px -10px rgba(0, 0, 0, 0.7); transition: transform 0.2s var(--ease); }
+.show:hover { transform: translateY(-1px); }
+.show i { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: var(--ink); color: var(--paper); }
+.moments { margin-top: 10px; display: grid; gap: 6px; }
+.moments .eyebrow-ui { font-size: 9.5px; }
+.moment { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center; text-align: left; padding: 8px 10px; border-radius: 12px; background: rgba(0, 0, 0, 0.22); border: 1px solid var(--line); font-family: var(--sans); font-size: 12px; color: var(--text-2); transition: border-color 0.2s var(--ease); }
+.moment:hover { border-color: rgba(143, 211, 182, 0.4); color: var(--text); }
+.moment b { font-family: var(--mono); font-weight: 500; font-size: 11px; color: var(--jade); }
+.moment span { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.from-kb { display: flex; width: max-content; max-width: 100%; align-items: center; gap: 6px; margin-bottom: 6px; font-family: var(--sans); font-size: 10.5px; font-weight: 650; letter-spacing: 0.06em; color: var(--amber); }
+.from-kb.src-speech { color: var(--rose); }
+.from-kb.src-screen, .from-kb.src-book { color: var(--jade); }
+
+/* modal */
+.scrim { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; background: rgba(8, 7, 6, 0.55); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: fade 0.25s var(--ease) both; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+.modal { width: min(520px, 100%); border-radius: var(--r-xl); padding: 26px; animation: rise 0.4s var(--ease) both; }
+.modal h3 { margin: 0; font-family: var(--serif); font-weight: 400; font-size: 26px; letter-spacing: -0.01em; }
+.modal p.sub { margin: 6px 0 18px; color: var(--text-2); font-size: 13px; line-height: 1.55; }
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px; border-radius: 14px; background: rgba(0, 0, 0, 0.22); border: 1px solid var(--line); }
+.toggle b { font-weight: 600; font-size: 13.5px; }
+.toggle small { display: block; color: var(--text-3); font-size: 12px; margin-top: 2px; }
+.switch { position: relative; width: 44px; height: 26px; flex: none; border-radius: 999px; background: rgba(243, 240, 232, 0.14); transition: background 0.25s var(--ease); }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--paper); transition: transform 0.25s var(--ease); }
+.switch[aria-checked="true"] { background: var(--jade-deep); }
+.switch[aria-checked="true"]::after { transform: translateX(18px); }
+.invite { display: flex; gap: 8px; margin-top: 14px; }
+.invite input { flex: 1; height: 40px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.26); outline: none; }
+.invite input:focus { border-color: rgba(143, 211, 182, 0.45); }
+.people { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; max-height: 180px; overflow: auto; }
+.people li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; border-radius: 10px; background: rgba(243, 240, 232, 0.04); font-size: 13px; }
+.people li button { color: var(--text-3); }
+.people li button:hover { color: var(--rose); }
+.linkrow { display: flex; gap: 8px; margin-top: 18px; padding: 6px 6px 6px 14px; border-radius: 14px; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--line); align-items: center; }
+.linkrow code { flex: 1; font-family: var(--mono); font-size: 11.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modal .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.files { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.files span { font-size: 11.5px; padding: 4px 10px; border-radius: 999px; background: rgba(243, 240, 232, 0.07); border: 1px solid var(--line); color: var(--text-2); }
+.files span.kb { color: var(--amber); border-color: rgba(231, 184, 114, 0.28); }
+
 /* toast */
 #toast { position: fixed; z-index: 20; left: 50%; bottom: 26px; transform: translate(-50%, 20px); opacity: 0; padding: 10px 16px; border-radius: 999px; font-size: 13px; transition: all 0.35s var(--ease); pointer-events: none; }
 #toast.on { opacity: 1; transform: translate(-50%, 0); }
@@ -528,8 +583,10 @@ button.cite:hover { background: rgba(143, 211, 182, 0.16); }
   </aside>
 </div>
 <div id="toast" class="glass" role="status"></div>
+<div id="modal-root"></div>
 <p id="live" class="sr" aria-live="polite"></p>
-<input id="file" type="file" hidden>
+<input id="file" type="file" multiple hidden>
+<input id="kbfile" type="file" multiple hidden>
 
 <script>
 const GROUPS = [
@@ -540,12 +597,13 @@ const GROUPS = [
     ["executive-business-review", "Executive review", "Six slides from mixed evidence"],
   ] },
   { name: "Documents & decks", icon: "i-doc", items: [
+    ["launch-announcement", "Tool launch", "Announce what ships — deck and narrated video"],
+    ["onboarding-guide", "Onboarding guide", "Handbooks become a video course with checkpoints"],
+    ["training-course", "Training course", "How-tos become numbered steps you can quiz"],
     ["leadership-brief", "Leadership brief", "Word, PDF, PowerPoint or notes"],
-    ["launch-announcement", "Launch", "Announce what ships and the ask"],
-    ["wbr-executive", "WBR executive cut", "The one-screen version of the week"],
   ] },
   { name: "Recordings", icon: "i-wave", items: [
-    ["product-walkthrough", "Product walkthrough", "Cut, captioned, chaptered"],
+    ["product-walkthrough", "Ask-me demo", "Record once; viewers ask the video. Add your knowledge base"],
     ["continuous-take-demo", "Continuous take", "One unbroken take, beat by beat"],
     ["still-sequence-slideshow", "Cited slideshow", "Advance through cited stills"],
   ] },
@@ -555,24 +613,28 @@ const SKILL_WORD = {
   "wbr-executive": "WBR", "wbr-kpi-spine": "WBR", "sop-training": "Procedure", "feature-delta": "What changed",
   "weekly-ops-review": "Weekly", "finance-wbr": "Finance", "half-year-business-review": "Half-year",
   "executive-business-review": "Exec review", "leadership-brief": "Brief", "launch-announcement": "Launch", localize: "Briefing",
+  "onboarding-guide": "Onboarding", "training-course": "Training",
 };
 const SKILL_EYEBROW = {
   "weekly-ops-review": "Weekly operating review", "finance-wbr": "Finance weekly business review",
   "half-year-business-review": "Half-year business review", "executive-business-review": "Executive business review",
   "leadership-brief": "Leadership brief", "launch-announcement": "Launch", "sop-training": "Procedure",
+  "onboarding-guide": "Onboarding", "training-course": "Training",
   "product-walkthrough": "Walkthrough", "feature-delta": "What changed", localize: "Briefing",
 };
 const LAYOUTS = new Set(["cover", "big-number", "versus-target", "movers", "source-range", "risk", "ask", "statement", "step"]);
 const DECK_FIT = "html,body{height:100%;margin:0;overflow:hidden}.deck{height:100% !important;overflow-y:auto !important;scrollbar-width:none}.deck::-webkit-scrollbar{display:none}.slide{height:100% !important;overflow:hidden !important;container-type:size !important;box-sizing:border-box !important;display:flex !important;align-items:center !important;justify-content:center !important;padding:0 !important;margin:0 !important}.frame{width:100% !important;height:100% !important;max-width:none !important;aspect-ratio:auto !important;box-shadow:none !important;border:0 !important}";
 const WORKBOOK_SKILLS = new Set(["weekly-ops-review", "finance-wbr", "half-year-business-review", "executive-business-review", "wbr-executive", "wbr-kpi-spine", "kpi-spotlight-deck"]);
-const DOCUMENT_SKILLS = new Set(["leadership-brief", "launch-announcement", "executive-business-review"]);
+const DOCUMENT_SKILLS = new Set(["leadership-brief", "launch-announcement", "executive-business-review", "onboarding-guide", "training-course"]);
 const RECORDING_SKILLS = new Set(["product-walkthrough", "sop-training", "feature-delta", "continuous-take-demo", "still-sequence-slideshow", "chaptered-demo-cut"]);
 
 const room = {
   briefings: [], current: null, openingId: "", mode: "intake", beat: 0,
   skill: "weekly-ops-review", busy: false, ticket: 0, edl: null, indexError: false,
   tab: "ask", sources: null, filter: "", health: null, me: null,
+  watch: location.pathname.startsWith("/watch/"), clipEnd: null,
 };
+const FILM_FIRST = new Set(["onboarding-guide", "training-course", "launch-announcement", "product-walkthrough", "sop-training", "feature-delta", "continuous-take-demo"]);
 
 function boot() {
   byId("tools").addEventListener("click", onTool);
@@ -592,14 +654,22 @@ function boot() {
   window.addEventListener("drop", (event) => {
     event.preventDefault();
     document.body.classList.remove("dropping");
-    const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
-    if (file) begin(file);
+    const files = [...((event.dataTransfer && event.dataTransfer.files) || [])];
+    if (!files.length) return;
+    if (room.current && canEdit()) addKnowledge(files);
+    else if (!room.watch) begin(files);
   });
   byId("file").addEventListener("change", (event) => {
-    const file = event.target.files && event.target.files[0];
+    const files = [...(event.target.files || [])];
     event.target.value = "";
-    if (file) begin(file);
+    if (files.length) begin(files);
   });
+  byId("kbfile").addEventListener("change", (event) => {
+    const files = [...(event.target.files || [])];
+    event.target.value = "";
+    if (files.length) addKnowledge(files);
+  });
+  if (room.watch) byId("app").classList.add("watch");
   loadPosture();
   loadMe();
   loadIndex();
@@ -659,12 +729,20 @@ function renderFoot() {
 function syncRoute() {
   if (room.busy) return;
   const id = idFromHash();
-  if (!id) { room.current = null; room.openingId = ""; showIntake(); return; }
+  if (!id) {
+    room.current = null; room.openingId = "";
+    if (room.watch) { showMessage({ eyebrow: "Shared briefing", title: "This link is incomplete.", lead: "Ask the person who shared it for the full link." }); return; }
+    showIntake(); return;
+  }
   if (room.current && String(room.current.briefing.id) === id) return;
   openBriefing(id);
 }
 
 function idFromHash() {
+  if (room.watch) {
+    const path = location.pathname.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    if (path) return path[0];
+  }
   const match = location.hash.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
   return match ? match[0] : "";
 }
@@ -714,7 +792,8 @@ function renderTools() {
   const hasDeck = artifacts.some((item) => item.kind === "deck");
   if (current) {
     const accepted = script && script.accepted;
-    crumb.innerHTML = `<span class="title">${esc(current.briefing.title || "Untitled briefing")}</span><span class="chip">${esc(skillWord(current.briefing.skill_id))}${current.briefing.skill_version ? " · v" + esc(current.briefing.skill_version) : ""}</span>${script ? (accepted ? '<span class="chip jade"><svg width="12" height="12"><use href="#i-check"/></svg>Accepted</span>' : '<span class="chip amber">In review</span>') : ""}`;
+    const shared = !current.briefing.member ? '<span class="chip">Shared with you</span>' : "";
+    crumb.innerHTML = shared + `<span class="title">${esc(current.briefing.title || "Untitled briefing")}</span><span class="chip">${esc(skillWord(current.briefing.skill_id))}${current.briefing.skill_version ? " · v" + esc(current.briefing.skill_version) : ""}</span>${script ? (accepted ? '<span class="chip jade"><svg width="12" height="12"><use href="#i-check"/></svg>Accepted</span>' : '<span class="chip amber">In review</span>') : ""}`;
   } else {
     crumb.innerHTML = room.busy ? "" : '<span class="title" style="color:var(--text-2)">New briefing</span>';
   }
@@ -724,10 +803,13 @@ function renderTools() {
   if (script) segs.push(modeButton("read", "Script"));
   modes.innerHTML = segs.length > 1 ? `<div class="seg" role="group" aria-label="View">${segs.join("")}</div>` : "";
   const parts = [];
-  if (script && !script.accepted) parts.push(`<button type="button" class="btn primary" id="accept"><svg width="15" height="15"><use href="#i-check"/></svg>Accept script</button>`);
-  if (script) parts.push(`<button type="button" class="btn icon" id="project" title="Render again" aria-label="Render again"${room.busy ? " disabled" : ""}><svg width="16" height="16"><use href="#i-redo"/></svg></button>`);
-  if (current) parts.push(`<button type="button" class="btn icon" id="link" title="Copy link" aria-label="Copy link"><svg width="16" height="16"><use href="#i-link"/></svg></button>`);
-  parts.push(`<button type="button" class="btn" id="new"${room.busy ? " disabled" : ""}><svg width="15" height="15"><use href="#i-plus"/></svg>New</button>`);
+  const edit = canEdit();
+  if (edit && script && !script.accepted) parts.push(`<button type="button" class="btn primary" id="accept"><svg width="15" height="15"><use href="#i-check"/></svg>Accept script</button>`);
+  if (edit && current) parts.push(`<button type="button" class="btn squeeze" id="kb" title="Add knowledge: documents the chat can answer from"><svg width="15" height="15"><use href="#i-doc"/></svg><span class="lbl">Add knowledge</span></button>`);
+  if (edit && current) parts.push(`<button type="button" class="btn squeeze" id="share" title="Share to watch and ask"><svg width="15" height="15"><use href="#i-link"/></svg><span class="lbl">Share</span></button>`);
+  if (edit && script) parts.push(`<button type="button" class="btn icon" id="project" title="Render again" aria-label="Render again"${room.busy ? " disabled" : ""}><svg width="16" height="16"><use href="#i-redo"/></svg></button>`);
+  if (!edit && current) parts.push(`<button type="button" class="btn icon" id="link" title="Copy link" aria-label="Copy link"><svg width="16" height="16"><use href="#i-link"/></svg></button>`);
+  if (!room.watch) parts.push(`<button type="button" class="btn squeeze" id="new" title="New briefing"${room.busy ? " disabled" : ""}><svg width="15" height="15"><use href="#i-plus"/></svg><span class="lbl">New</span></button>`);
   tools.innerHTML = parts.join("");
 }
 
@@ -742,6 +824,8 @@ function onTool(event) {
   else if (button.id === "link") copyLink();
   else if (button.id === "accept") accept().catch((err) => toast(err.message || "Could not accept."));
   else if (button.id === "project") project();
+  else if (button.id === "kb") byId("kbfile").click();
+  else if (button.id === "share") openShare();
   else if (button.dataset.mode) setMode(button.dataset.mode);
 }
 
@@ -777,6 +861,12 @@ function setLayout(withPanel) {
   byId("app").classList.toggle("bare", !withPanel);
 }
 
+function canEdit() {
+  if (room.watch || !room.current) return !room.watch;
+  const role = room.current.briefing.role;
+  return Boolean(room.current.briefing.member) && ["editor", "owner", "admin"].includes(role);
+}
+
 /* ---------------- open a briefing ---------------- */
 async function openBriefing(id) {
   const mine = ++room.ticket;
@@ -799,6 +889,7 @@ async function openBriefing(id) {
     room.sources = null;
     room.mode = chooseMode(script, room.current.artifacts);
     document.title = (briefing.title || "Briefing") + " — Grounded Studio";
+    if (room.watch || !briefing.member) byId("app").classList.add("watch");
     setLayout(Boolean(script));
     await paintStage();
     renderRail();
@@ -834,6 +925,7 @@ function chooseMode(script, artifacts) {
   const video = artifacts.some((item) => item.kind === "video");
   const deck = artifacts.some((item) => item.kind === "deck");
   if (script && script.renderer === "recording" && video) return "film";
+  if (script && video && FILM_FIRST.has(script.skill_id)) return "film";
   if (deck) return "deck";
   if (video) return "film";
   if (script) return "read";
@@ -894,7 +986,7 @@ function showFilm(artifact, vtt) {
   caption.hidden = true;
   screen.append(video, caption);
   stage.appendChild(screen);
-  video.addEventListener("click", togglePlay);
+  video.addEventListener("click", () => { room.clipEnd = null; togglePlay(); });
   video.addEventListener("timeupdate", () => onFilmTime(video));
   video.addEventListener("loadedmetadata", () => onFilmTime(video));
   video.addEventListener("play", () => setPlayLabel(true));
@@ -1078,6 +1170,7 @@ function markChapter(index) {
 
 function onFilmTime(video) {
   const ms = video.currentTime * 1000;
+  if (room.clipEnd != null && video.currentTime >= room.clipEnd) { video.pause(); room.clipEnd = null; }
   const index = indexAt(chapterItems(room.edl), ms);
   if (index !== room.beat) { room.beat = index; markChapter(index); renderPanel(); }
   const fill = byId("fill");
@@ -1094,6 +1187,46 @@ function onFilmTime(video) {
   const text = captionAt(room.edl, ms);
   caption.textContent = text;
   caption.hidden = !text;
+}
+
+function filmTime(sourceMs) {
+  const cuts = ((room.edl && room.edl.items) || []).filter((item) => item.type === "cut" && item.src_in_ms != null);
+  if (!cuts.length) return Number(sourceMs || 0);
+  const ms = Number(sourceMs || 0);
+  const hit = cuts.find((cut) => ms >= cut.src_in_ms && ms < cut.src_out_ms);
+  if (hit) return hit.out_in_ms + (ms - hit.src_in_ms);
+  const next = cuts.find((cut) => cut.src_in_ms >= ms);
+  return next ? next.out_in_ms : cuts[cuts.length - 1].out_in_ms;
+}
+
+function chapterTime(ord) {
+  const item = ((room.edl && room.edl.items) || []).find((entry) => entry.ord === ord && (entry.type === "chapter" || entry.type === "cut"));
+  return item ? { start: item.out_in_ms, end: item.out_in_ms + item.duration_ms } : null;
+}
+
+async function showMe(target) {
+  const artifacts = (room.current && room.current.artifacts) || [];
+  if (!artifacts.some((item) => item.kind === "video")) {
+    if (target.ord) goBeat(Number(target.ord) - 1);
+    return;
+  }
+  if (room.mode !== "film") { room.mode = "film"; await paintStage(); renderTools(); }
+  const video = byId("film");
+  if (!video) return;
+  let span = null;
+  if (target.citation && target.citation.kind === "recording") {
+    span = { start: filmTime(target.citation.t_start_ms), end: filmTime(target.citation.t_end_ms) };
+    if (span.end <= span.start) span.end = span.start + 4000;
+  } else if (target.ord) {
+    span = chapterTime(Number(target.ord));
+  }
+  if (!span) return;
+  const play = () => {
+    video.currentTime = Math.max(0, span.start / 1000 - 0.15);
+    room.clipEnd = span.end / 1000 + 0.25;
+    video.play().catch(() => {});
+  };
+  if (video.readyState >= 1) play(); else video.addEventListener("loadedmetadata", play, { once: true });
 }
 
 function togglePlay() {
@@ -1152,6 +1285,10 @@ function currentBeat() {
   const beats = (script && script.beats) || [];
   if (room.mode === "film") {
     const item = chapterItems(room.edl)[room.beat];
+    if (item && item.ord) {
+      const byOrd = beats.find((beat) => beat.ord === item.ord);
+      if (byOrd) return byOrd;
+    }
     if (item) {
       const text = String(item.text || item.title || "").toLowerCase();
       const match = beats.find((beat) => String(beat.text || "").toLowerCase() === text);
@@ -1180,10 +1317,29 @@ function renderThread() {
     if (item.role === "me") return `<div class="msg me">${esc(item.text)}</div>`;
     if (item.pending) return `<div class="msg bot typing" aria-label="Thinking"><i></i><i></i><i></i></div>`;
     if (item.bad) return `<div class="msg bot bad">${esc(item.text)}</div>`;
-    if (item.refused) return `<div class="msg bot refused"><div class="why"><svg width="13" height="13"><use href="#i-ban"/></svg>Not in the sources</div>${esc(item.text)}</div>`;
+    if (item.refused) {
+      const near = (item.moments || []).length ? `<div class="moments"><div class="eyebrow-ui">Closest moments in the demo</div>${item.moments.map((moment, index) => `<button type="button" class="moment" data-mo="${item.id}" data-i="${index}"><b>${esc(clock(moment.citation.t_start_ms))}</b><span>${esc(moment.text)}</span></button>`).join("")}</div>` : "";
+      return `<div class="msg bot refused"><div class="why"><svg width="13" height="13"><use href="#i-ban"/></svg>Not in the sources</div>${esc(item.text)}${near}</div>`;
+    }
     const cites = (item.citations || []).map((cite, index) => `<button type="button" class="cite" data-m="${item.id}" data-c="${index}">${esc(citeOne(cite))}</button>`).join("");
-    return `<div class="msg bot">${esc(item.text)}${cites ? `<div class="cites">${cites}</div>` : ""}</div>`;
+    const label = { speech: ["src-speech", "From the demo"], screen: ["src-screen", "On screen"], document: ["src-kb", "From the knowledge base"], workbook: ["src-book", "From the workbook"], beat: ["", ""] }[item.source] || ["", ""];
+    const badge = label[1] ? `<div class="from-kb ${label[0]}">${esc(label[1])}</div>` : "";
+    const first = (item.citations || [])[0] || {};
+    const hasVideo = ((room.current.artifacts || []).some((art) => art.kind === "video"));
+    const showable = hasVideo && (first.kind === "recording" || item.ord);
+    const show = showable ? `<button type="button" class="show" data-show="${item.id}"><i><svg width="10" height="10"><use href="#i-play"/></svg></i>Show me${first.kind === "recording" ? " · " + esc(clock(first.t_start_ms)) : ""}</button>` : "";
+    const moments = (item.moments || []).length ? `<div class="moments"><div class="eyebrow-ui">Watch it in the demo</div>${item.moments.map((moment, index) => `<button type="button" class="moment" data-mo="${item.id}" data-i="${index}"><b>${esc(clock(moment.citation.t_start_ms))}</b><span>${esc(moment.text)}</span></button>`).join("")}</div>` : "";
+    return `<div class="msg bot">${badge}${esc(item.text)}${cites ? `<div class="cites">${cites}</div>` : ""}${show}${moments}</div>`;
   }).join("");
+  thread.querySelectorAll("[data-show]").forEach((node) => node.addEventListener("click", () => {
+    const item = items.find((entry) => String(entry.id) === node.dataset.show);
+    if (item) showMe({ citation: (item.citations || [])[0], ord: item.ord });
+  }));
+  thread.querySelectorAll("[data-mo]").forEach((node) => node.addEventListener("click", () => {
+    const item = items.find((entry) => String(entry.id) === node.dataset.mo);
+    const moment = item && item.moments[Number(node.dataset.i)];
+    if (moment) showMe({ citation: moment.citation });
+  }));
   thread.querySelectorAll(".cite[data-m]").forEach((node) => node.addEventListener("click", () => {
     const item = items.find((entry) => String(entry.id) === node.dataset.m);
     if (item) jumpTo(item);
@@ -1267,13 +1423,13 @@ function renderProvenance() {
 }
 
 function jumpTo(item) {
+  const cite = (item.citations || [])[0];
+  if (cite && cite.kind === "recording") { showMe({ citation: cite }); return; }
   if (item.ord) {
-    if (room.mode === "film") seekFilmBeat(item);
+    if (room.mode === "film") showMe({ ord: item.ord });
     else goBeat(Number(item.ord) - 1);
     return;
   }
-  const cite = (item.citations || [])[0];
-  if (cite && cite.kind === "recording" && room.mode === "film") { seekFilmBeat(item); return; }
   setTab("sources");
 }
 
@@ -1293,25 +1449,13 @@ async function onAsk(event) {
   try {
     const data = await postJson("/api/v1/briefings/" + room.current.briefing.id + "/chat", { question });
     const entry = thread.find((item) => item.id === id);
-    Object.assign(entry, { pending: false, text: data.text || "", refused: Boolean(data.refused), citations: data.citations || [], ord: data.ord });
-    if (!data.refused && data.ord) jumpTo(entry);
+    Object.assign(entry, { pending: false, text: data.text || "", refused: Boolean(data.refused), citations: data.citations || [], ord: data.ord, source: data.source, moments: data.moments || [] });
+    if (!data.refused && room.mode !== "film" && data.ord) goBeat(Number(data.ord) - 1);
   } catch (err) {
     const entry = thread.find((item) => item.id === id);
     Object.assign(entry, { pending: false, bad: true, text: "The studio could not answer right now." });
   }
   renderThread();
-}
-
-function seekFilmBeat(data) {
-  const video = byId("film");
-  if (!video) return;
-  const beats = (room.current.script && room.current.script.beats) || [];
-  const beat = beats.find((item) => item.ord === data.ord) || beats[Number(data.ord) - 1];
-  const cite = ((data.citations || [])[0]) || (beat && (beat.citations || [])[0]);
-  if (cite && cite.kind === "recording" && cite.t_start_ms != null) { video.currentTime = Number(cite.t_start_ms) / 1000; return; }
-  const text = beat && String(beat.text || "").toLowerCase();
-  const cut = ((room.edl && room.edl.items) || []).find((item) => String(item.text || "").toLowerCase() === text);
-  if (cut) video.currentTime = Number(cut.out_in_ms || 0) / 1000;
 }
 
 function autosize() {
@@ -1346,28 +1490,49 @@ async function project() {
   }
 }
 
-async function begin(file) {
+function kindOf(file) {
+  const name = file.name.toLowerCase();
+  if (/\.(xlsx|xlsm|csv)$/.test(name)) return "workbook";
+  if (/\.(docx|pdf|txt|md|markdown|pptx|png|jpe?g|gif|webp)$/.test(name)) return "document";
+  if (name.endsWith(".zip")) return "package";
+  if (/\.(mp4|mov|m4v|webm|mkv|mp3|wav|m4a|aac|ogg)$/.test(name)) return "recording";
+  return "document";
+}
+
+function planFiles(files) {
+  const kinds = files.map(kindOf);
+  if (kinds.includes("recording")) return { skill: RECORDING_SKILLS.has(room.skill) ? room.skill : "product-walkthrough", kind: "recording" };
+  if (kinds.includes("workbook")) return { skill: WORKBOOK_SKILLS.has(room.skill) ? room.skill : "weekly-ops-review", kind: "workbook" };
+  if (kinds.includes("package") && kinds.length === 1) return { skill: WORKBOOK_SKILLS.has(room.skill) || DOCUMENT_SKILLS.has(room.skill) ? room.skill : "executive-business-review", kind: "package" };
+  return { skill: DOCUMENT_SKILLS.has(room.skill) ? room.skill : "leadership-brief", kind: "document" };
+}
+
+async function begin(input) {
   if (room.busy) return;
-  if (/\.(xls|doc|ppt)$/i.test(file.name)) {
-    showMessage({ eyebrow: "Legacy file", title: "This is a legacy Office binary.", lead: "Save it as .xlsx, .docx or .pptx and drop it again.", bad: true });
+  const files = Array.isArray(input) ? input : [input];
+  const legacy = files.find((file) => /\.(xls|doc|ppt)$/i.test(file.name));
+  if (legacy) {
+    showMessage({ eyebrow: "Legacy file", title: "This is a legacy Office binary.", lead: legacy.name + " — save it as .xlsx, .docx or .pptx and drop it again.", bad: true });
     hideScrub();
     return;
   }
-  const plan = planFor(file);
-  const title = titleFrom(file.name);
+  const plan = planFiles(files);
+  const main = files.find((file) => kindOf(file) === plan.kind) || files[0];
+  const extras = files.filter((file) => file !== main);
+  const title = titleFrom(main.name);
   room.skill = plan.skill;
   room.busy = true;
   room.current = null;
   setLayout(false);
   const steps = [
-    { key: "upload", label: "Taking the file in.", hint: "Streamed and hashed into private storage" },
+    { key: "upload", label: files.length > 1 ? `Taking ${files.length} files in.` : "Taking the file in.", hint: extras.length ? `${main.name} + ${extras.length} for the knowledge base` : "Streamed and hashed into private storage" },
     { key: "read", label: "Reading the sources.", hint: "Cells, pages, slides and blocks, located" },
   ];
-  if (plan.kind === "recording") steps.push({ key: "transcribe", label: "Listening to the recording.", hint: "Local transcription, timestamped" });
-  steps.push({ key: "compile", label: "Writing the script.", hint: "Every number tied to its cell, then verified" });
-  steps.push({ key: "render", label: "Projecting the briefing.", hint: "Deck, film, captions and audits" });
+  if (plan.kind === "recording") steps.push({ key: "transcribe", label: "Listening and reading the screen.", hint: "Local transcription and on-screen text, timestamped" });
+  steps.push({ key: "compile", label: "Writing the script.", hint: "Every claim tied to its source, then verified" });
+  steps.push({ key: "render", label: "Producing the briefing.", hint: plan.kind === "recording" ? "Edited film, chapters, captions" : "Deck, narrated video, captions and audits" });
   renderTools();
-  showWorking(plan.skill, title, steps, file.name);
+  showWorking(plan.skill, title, steps, files.map((file) => file.name).join(" · "));
   try {
     let created = null;
     await runStep(steps, "upload", async () => {
@@ -1375,12 +1540,13 @@ async function begin(file) {
       room.openingId = created.id;
       history.replaceState(null, "", "#/" + created.id);
       await loadIndex();
-      await postFile("/api/v1/briefings/" + created.id + "/assets", plan.kind, file);
+      for (const file of [main, ...extras]) await postFile("/api/v1/briefings/" + created.id + "/assets", kindOf(file), file);
     });
     await runStep(steps, "read", () => runJob(created.id, "ingest"));
     if (plan.kind === "recording") await runStep(steps, "transcribe", () => runJob(created.id, "transcribe"));
     await runStep(steps, "compile", () => runJob(created.id, "compile"));
     await runStep(steps, "render", () => runJob(created.id, "render"));
+    runJob(created.id, "index").catch(() => {});
     room.busy = false;
     toast("Briefing ready");
     await openBriefing(created.id);
@@ -1390,6 +1556,67 @@ async function begin(file) {
     renderTools();
     loadIndex();
   }
+}
+
+async function addKnowledge(files) {
+  if (!room.current || room.busy) return;
+  const briefing = room.current.briefing;
+  const legacy = files.find((file) => /\.(xls|doc|ppt)$/i.test(file.name));
+  if (legacy) { toast(legacy.name + " is a legacy binary — save as .xlsx/.docx/.pptx"); return; }
+  toast(`Adding ${files.length} to the knowledge base…`);
+  try {
+    for (const file of files) await postFile("/api/v1/briefings/" + briefing.id + "/assets", kindOf(file), file);
+    await runJob(briefing.id, "ingest");
+    runJob(briefing.id, "index").catch(() => {});
+    room.current.briefing = await getJson("/api/v1/briefings/" + briefing.id);
+    room.sources = null;
+    loadSources(briefing.id, room.ticket);
+    toast("Knowledge added — ask away");
+  } catch (err) {
+    toast(err.message || "Could not add that file");
+  }
+}
+
+/* ---------------- sharing ---------------- */
+async function openShare() {
+  if (!room.current) return;
+  const id = room.current.briefing.id;
+  let state;
+  try { state = await getJson("/api/v1/briefings/" + id + "/share"); }
+  catch (err) { toast("Sharing is not available"); return; }
+  const url = location.origin + state.watch_path;
+  const root = byId("modal-root");
+  const paint = () => {
+    root.innerHTML = `<div class="scrim" id="scrim"><section class="modal glass" role="dialog" aria-modal="true" aria-labelledby="share-title">
+      <h3 id="share-title">Share to watch and ask</h3>
+      <p class="sub">Viewers can watch, follow the chapters and ask the briefing questions. They can't edit, re-render or download the raw sources. Everyone still signs in with company SSO.</p>
+      <div class="toggle"><div><b>Anyone at the company with the link</b><small>Any signed-in colleague can open the watch page.</small></div><button type="button" class="switch" role="switch" id="company" aria-checked="${state.company ? "true" : "false"}" aria-label="Anyone at the company with the link"></button></div>
+      <form class="invite" id="invite"><input id="invite-email" type="email" placeholder="name@company.com, another@company.com" autocomplete="off"><button class="btn primary" type="submit">Add</button></form>
+      <ul class="people">${(state.people || []).map((person) => `<li><span>${esc(person.email)}</span><button type="button" data-remove="${esc(person.email)}" aria-label="Remove ${esc(person.email)}"><svg width="14" height="14"><use href="#i-x"/></svg></button></li>`).join("")}</ul>
+      <div class="linkrow"><code>${esc(url)}</code><button type="button" class="btn primary" id="copy-watch">Copy link</button></div>
+      <div class="row"><button type="button" class="btn" id="close-share">Done</button></div>
+    </section></div>`;
+    byId("close-share").addEventListener("click", close);
+    byId("scrim").addEventListener("click", (event) => { if (event.target.id === "scrim") close(); });
+    byId("copy-watch").addEventListener("click", () => { navigator.clipboard && navigator.clipboard.writeText(url).then(() => toast("Watch link copied"), () => toast(url)); });
+    byId("company").addEventListener("click", async () => { state = await postJson("/api/v1/briefings/" + id + "/share", { company: !state.company }); paint(); });
+    byId("invite").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const emails = byId("invite-email").value.split(/[\s,;]+/).filter(Boolean);
+      if (!emails.length) return;
+      try { state = await postJson("/api/v1/briefings/" + id + "/share", { emails }); paint(); toast("Shared"); }
+      catch (err) { toast(err.message || "Could not share"); }
+    });
+    root.querySelectorAll("[data-remove]").forEach((node) => node.addEventListener("click", async () => {
+      await fetch("/api/v1/briefings/" + id + "/share/" + encodeURIComponent(node.dataset.remove), { method: "DELETE", credentials: "same-origin" });
+      state = await getJson("/api/v1/briefings/" + id + "/share"); paint();
+    }));
+    const input = byId("invite-email");
+    if (input) input.focus();
+  };
+  const close = () => { root.innerHTML = ""; };
+  document.addEventListener("keydown", function onEsc(event) { if (event.key === "Escape") { close(); document.removeEventListener("keydown", onEsc); } });
+  paint();
 }
 
 async function runStep(steps, key, work) {
@@ -1423,14 +1650,6 @@ async function runJob(id, type) {
   throw new Error("Still working. It is taking longer than expected.");
 }
 
-function planFor(file) {
-  const name = file.name.toLowerCase();
-  if (/\.(xlsx|xlsm|csv)$/.test(name)) return { skill: WORKBOOK_SKILLS.has(room.skill) ? room.skill : "weekly-ops-review", kind: "workbook" };
-  if (/\.(docx|pdf|txt|md|pptx|png|jpe?g|gif|webp)$/.test(name)) return { skill: DOCUMENT_SKILLS.has(room.skill) ? room.skill : "leadership-brief", kind: "document" };
-  if (name.endsWith(".zip")) return { skill: WORKBOOK_SKILLS.has(room.skill) ? room.skill : "executive-business-review", kind: "package" };
-  return { skill: RECORDING_SKILLS.has(room.skill) ? room.skill : "product-walkthrough", kind: "recording" };
-}
-
 /* ---------------- views ---------------- */
 function showIntake() {
   room.mode = "intake";
@@ -1442,15 +1661,16 @@ function showIntake() {
   <section class="intake">
     <div class="hero">
       <span class="chip jade kick"><span class="dot"></span>Cite-or-cut briefings · ${esc(room.health && room.health.deployment_mode === "aws-private" ? "AWS private" : "runs on your network")}</span>
-      <h1>The week's evidence, told as a briefing that <em>cannot&nbsp;invent.</em></h1>
-      <p>Drop a workbook, a document, a deck or a recording. Grounded Studio writes the story, ties every number to its cell, page or second — and refuses anything the sources don't say.</p>
+      <h1>Record it once. Let everyone <em>ask&nbsp;the&nbsp;video.</em></h1>
+      <p>Drop a demo with your knowledge base, a handbook, a launch note or a workbook. Grounded Studio produces the film or deck, answers questions by showing the exact moment or quoting the source — and refuses anything your sources don't say.</p>
     </div>
     <div class="drop glass" id="drop" role="button" tabindex="0" aria-label="Choose a file to brief">
       <div class="orb"><svg width="28" height="28"><use href="#i-upload"/></svg></div>
       <div>
         <h2>What should the room watch?</h2>
+        <p class="kbnote" style="margin-top:4px;font-size:12.5px;color:var(--amber)">Tip: drop a recording together with its docs — they become the video's knowledge base.</p>
         <p id="hint">${esc(skillHint(room.skill))}</p>
-        <div class="formats"><span>.xlsx</span><span>.csv</span><span>.docx</span><span>.pdf</span><span>.pptx</span><span>.md</span><span>.png</span><span>.mp4</span><span>.mov</span><span>.zip</span></div>
+        <div class="formats"><span>.xlsx</span><span>.csv</span><span>.docx</span><span>.pdf</span><span>.pptx</span><span>.md</span><span>.png</span><span>.mp4</span><span>.mov</span><span>.zip</span><span>several at once</span></div>
       </div>
       <button type="button" class="btn primary" id="browse">Choose a file</button>
     </div>
@@ -1459,7 +1679,7 @@ function showIntake() {
     <div class="trust">
       <div class="glass"><svg width="20" height="20"><use href="#i-pin"/></svg><b>Every number cites its source</b><span>Sheet and cell, page and block, or timestamp. Computed figures are re-derived from the cells before they ship.</span></div>
       <div class="glass"><svg width="20" height="20"><use href="#i-shield"/></svg><b>Stays on your network</b><span>Parsing, transcription, voice and storage run on private infrastructure. Public AI endpoints are refused.</span></div>
-      <div class="glass"><svg width="20" height="20"><use href="#i-ban"/></svg><b>Refuses what isn't there</b><span>Ask anything. If the briefing's sources don't say it, the answer is "That is not in this briefing."</span></div>
+      <div class="glass"><svg width="20" height="20"><use href="#i-play"/></svg><b>Answers by showing you</b><span>Questions play the exact clip from the demo, quote the knowledge base, or say "That is not in this briefing."</span></div>
     </div>
   </section>`;
   stage.querySelectorAll("[data-skill]").forEach((node) => node.addEventListener("click", () => {
@@ -1538,8 +1758,6 @@ function currentBeats() {
 
 function chapterItems(edl) {
   const items = (edl && edl.items) || [];
-  const carries = items.filter((item) => item.type === "carry");
-  if (carries.length) return carries;
   const chapters = items.filter((item) => item.type === "chapter");
   return chapters.length ? chapters : items.filter((item) => item.type === "cut");
 }
@@ -1594,10 +1812,13 @@ function skillWord(skill) { return SKILL_WORD[skill] || "Briefing"; }
 function skillHint(skill) {
   if (skill === "executive-business-review") return "A workbook, documents, a deck, or a .zip of them. Every number cites its cell.";
   if (WORKBOOK_SKILLS.has(skill)) return "An Excel or CSV workbook (or a .zip with its memo). Every number cites its cell.";
-  if (skill === "leadership-brief" || skill === "launch-announcement") return "A Word, PDF, PowerPoint, Markdown file or screenshot.";
+  if (skill === "launch-announcement") return "Your launch note (Word, PDF, Markdown or slides). You get a deck and a narrated launch video.";
+  if (skill === "onboarding-guide") return "Handbooks and best-practice docs. They become a narrated onboarding video with steps and checkpoints.";
+  if (skill === "training-course") return "A how-to or procedure document. It becomes a narrated training video with numbered steps and checks.";
+  if (skill === "leadership-brief") return "A Word, PDF, PowerPoint, Markdown file or screenshot.";
   if (skill === "continuous-take-demo") return "A screen recording. Each beat keeps a frame from the last.";
   if (skill === "still-sequence-slideshow") return "A screen recording, advanced as cited stills.";
-  return "A screen recording. Filler and dead air are cut; every line keeps its timestamp.";
+  return "Your demo recording — add the tool's docs too. Viewers ask the video; answers play the moment or quote the docs.";
 }
 
 function titleFrom(name) {

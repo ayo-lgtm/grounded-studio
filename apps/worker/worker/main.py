@@ -367,6 +367,8 @@ def transcribe(db, briefing_id: str) -> dict:
         raise JobError("no recording asset")
     provider = registry.transcription_provider()
     asset_id, key, filename = str(asset[0]), asset[1], asset[2]
+    screen: list[dict] = []
+    reader = None
     with tempfile.TemporaryDirectory() as tmp:
         dest = Path(tmp) / ("upload" + (Path(filename or "").suffix or ".mp4"))
         _download(key, dest)
@@ -375,6 +377,7 @@ def transcribe(db, briefing_id: str) -> dict:
             segments = provider.transcribe(dest, (settings.trans_language or "en")[:2])
         except ProviderError as exc:
             raise JobError(str(exc)) from exc
+        screen, reader = _read_screen(dest, duration)
     if not segments:
         raise JobError("transcription returned no speech")
     db.execute(text("DELETE FROM transcript_segments WHERE asset_id = :aid"), {"aid": asset_id})
@@ -394,6 +397,22 @@ def transcribe(db, briefing_id: str) -> dict:
                 "text": segment["text"],
             },
         )
+    for segment in screen:
+        db.execute(
+            text(
+                """
+                INSERT INTO transcript_segments (id, asset_id, t_start_ms, t_end_ms, text, speaker)
+                VALUES (:id, :aid, :start_ms, :end_ms, :text, 'screen')
+                """
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "aid": asset_id,
+                "start_ms": segment["t_start_ms"],
+                "end_ms": segment["t_end_ms"],
+                "text": segment["text"],
+            },
+        )
     db.execute(
         text(
             "UPDATE source_assets SET duration_ms = COALESCE(:d, duration_ms), normalized_at = now() WHERE id = :id"
@@ -401,8 +420,29 @@ def transcribe(db, briefing_id: str) -> dict:
         {"id": asset_id, "d": duration},
     )
     db.commit()
-    logsafe.log_event("transcribe.done", briefing_id=briefing_id, segments=len(segments), provider=provider.name)
-    return {"transcription": f"{provider.name}:{provider.model_id}"}
+    logsafe.log_event("transcribe.done", briefing_id=briefing_id, segments=len(segments), count=len(screen), provider=provider.name)
+    models = {"transcription": f"{provider.name}:{provider.model_id}"}
+    if reader is not None:
+        models["screen_text"] = f"{reader.name}:{reader.model_id}"
+    return models
+
+
+def _read_screen(video: Path, duration: int | None) -> tuple[list[dict], object | None]:
+    """On-screen text, timestamped, if an image-text provider is selected."""
+    from grounded.providers.base import ProviderError
+    from grounded.screen_text import ScreenTextError, read_screen
+
+    try:
+        reader = registry.image_text_provider()
+    except ProviderError:
+        return [], None
+    if reader is None:
+        return [], None
+    try:
+        return read_screen(video, reader, interval=float(settings.screen_interval_s), duration_ms=duration), reader
+    except ScreenTextError as exc:
+        logsafe.log_failure("screen.failed", exc)
+        return [], reader
 
 
 # ---------------------------------------------------------------- compile
@@ -440,7 +480,7 @@ def build_bundle(db, briefing_id: str):
             rows = db.execute(
                 text(
                     "SELECT t_start_ms, t_end_ms, text FROM transcript_segments "
-                    "WHERE asset_id = :id ORDER BY t_start_ms"
+                    "WHERE asset_id = :id AND (speaker IS NULL OR speaker <> 'screen') ORDER BY t_start_ms"
                 ),
                 {"id": asset_id},
             ).mappings().all()
@@ -779,9 +819,11 @@ def render(db, briefing_id: str) -> dict:
             video = rendered.get("video")
         else:
             render_deck(script, out / "deck.html")
+            models.update(_deck_video(script, out))
         _write_sidecars(script, out)
         write_audits(script, out)
-        models.update(_narrate(script, out, video))
+        if script.get("renderer") == "recording":
+            models.update(_narrate(script, out, video))
         _persist_artifacts(db, briefing_id, out)
     finally:
         shutil.rmtree(out, ignore_errors=True)
@@ -860,6 +902,22 @@ def _fetch_source_video(db, briefing_id: str, out: Path):
         raise JobError("no recording asset")
     suffix = Path(asset[3] or "").suffix or ".mp4"
     return _download(asset[1], out / f"upload{suffix}")
+
+
+def _deck_video(script: dict, out: Path) -> dict:
+    """Narrated mp4 of a deck (onboarding, training, launches, reviews)."""
+    from grounded.providers.base import ProviderError
+    from grounded.render_video import VideoError, render_narrated_video
+
+    if (settings.deck_video or "on").lower() in {"off", "0", "false", "no"} or not shutil.which("ffmpeg"):
+        return {}
+    voice = registry.speech_provider()
+    speak = getattr(voice, "synthesize", None) if voice is not None else None
+    try:
+        render_narrated_video(script, out, speak=speak)
+    except (VideoError, ProviderError) as exc:
+        raise JobError(str(exc)) from exc
+    return {"video": "narrated-deck", **({"tts": f"{voice.name}:{voice.model_id}"} if voice is not None else {})}
 
 
 def _narrate(script: dict, out: Path, video: Path | None) -> dict:

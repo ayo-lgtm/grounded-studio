@@ -98,7 +98,7 @@ class RoomPageTest(unittest.TestCase):
         self.assertIn("What should the room watch?", self.html)
         self.assertIn('id="stage"', self.html)
         self.assertIn('for="q" class="sr">Ask', self.html)
-        self.assertIn("Listening to the recording.", self.html)
+        self.assertIn("Listening and reading the screen.", self.html)
         self.assertIn("Writing the script.", self.html)
         self.assertIn("Projecting the briefing.", self.html)
         self.assertIn("Walkthrough", self.html)

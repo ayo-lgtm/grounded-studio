@@ -15,6 +15,8 @@ _EYEBROW = {
     "executive-business-review": "Executive business review",
     "leadership-brief": "Leadership brief",
     "launch-announcement": "Launch",
+    "onboarding-guide": "Onboarding",
+    "training-course": "Training",
     "sop-training": "Procedure",
     "product-walkthrough": "Walkthrough",
     "feature-delta": "What changed",
@@ -178,16 +180,21 @@ def _source_range(script: dict[str, Any], beat: dict[str, Any]) -> str:
 
 
 def _sentence(script: dict[str, Any], beat: dict[str, Any]) -> str:
-    eyebrow = (beat.get("slots") or {}).get("eyebrow") or ""
+    slots = beat.get("slots") or {}
+    eyebrow = slots.get("eyebrow") or ""
     klass = "eyebrow risk" if beat.get("layout") == "risk" else "eyebrow"
-    return f'<p class="{klass}">{html.escape(eyebrow)}</p><h1>{html.escape(beat["text"])}</h1>'
+    answer = slots.get("answer")
+    answer_html = (
+        f'<details class="lead"><summary>Show the answer</summary>{html.escape(str(answer))}</details>' if answer else ""
+    )
+    return f'<p class="{klass}">{html.escape(eyebrow)}</p><h1>{html.escape(beat["text"])}</h1>{answer_html}'
 
 
 def _step(script: dict[str, Any], beat: dict[str, Any]) -> str:
     screen = (beat.get("slots") or {}).get("screen") or ""
     screen_html = f'<p class="lead">{html.escape(screen)}</p>' if screen else ""
     return (
-        f'<p class="eyebrow">Step {beat["ord"]}</p>'
+        f'<p class="eyebrow">Step {(beat.get("slots") or {}).get("step") or beat["ord"]}</p>'
         f"<h1>{html.escape(beat['text'])}</h1>"
         f"{screen_html}"
     )
